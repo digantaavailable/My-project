@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { LicenseState, validateAndActivateKey, activate24HourPass, formatRemainingTime } from '../utils/license';
+import {
+  LicenseState,
+  validateAndActivateKey,
+  activate24HourPass,
+  formatRemainingTime,
+  generateRandom24HourKey,
+  MASTER_LICENSE_KEY,
+} from '../utils/license';
 import {
   Key,
   ShieldCheck,
@@ -103,15 +110,15 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
     setIsVerifyingUpi(true);
 
-    // Simulate backend payment verification & key generation
+    // Backend simulation: Generate unique random 24-hour key upon payment verification
     setTimeout(() => {
-      const generatedKey = `PASS-24H-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-      const newState = activate24HourPass(generatedKey);
+      const generatedKey = generateRandom24HourKey();
+      const newState = activate24HourPass(generatedKey, false);
 
       setIsVerifyingUpi(false);
       setIssuedKey(generatedKey);
       setSuccessMsg(
-        `Payment verified! Your 24-Hour Pass key (${generatedKey}) has been activated and delivered to ${userEmail}.`
+        `Payment verified! Your random 24-Hour Pass key (${generatedKey}) has been generated, activated for 24 hours, and sent to ${userEmail}.`
       );
       onUpdateLicense(newState);
     }, 1200);
@@ -385,25 +392,25 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             <form onSubmit={handleActivateKey} className="space-y-3">
               <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-slate-500" />
-                Enter Received 24-Hour License Key:
+                Enter License Key:
               </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={licenseKeyInput}
                   onChange={(e) => setLicenseKeyInput(e.target.value)}
-                  placeholder="e.g., PASS-24H-8F39 or DAYPASS24"
+                  placeholder={`e.g., ${MASTER_LICENSE_KEY} or PASS-8F2K-9M3Q`}
                   className="flex-1 text-xs font-mono uppercase border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
                 />
                 <button
                   type="submit"
                   className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition flex-shrink-0 cursor-pointer"
                 >
-                  Activate Pass
+                  Activate Key
                 </button>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Key will grant instant 24-hour unlimited access for creating and updating tournament draws.
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Enter the Master License Key (<strong>{MASTER_LICENSE_KEY}</strong>) for lifetime access, or a payment-generated 24-Hour Pass key (valid for 24 hours after activation).
               </p>
             </form>
           )}

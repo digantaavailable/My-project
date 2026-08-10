@@ -12,7 +12,44 @@ export interface LicenseState {
 }
 
 const LICENSE_STORAGE_KEY = 'tournament_draw_license_v1';
+const ISSUED_KEYS_STORAGE_KEY = 'tournament_draw_issued_keys_v1';
 export const MAX_TRIAL_EDITS = 5;
+
+// Official Single Master License Key
+export const MASTER_LICENSE_KEY = 'MASTER2026';
+
+// Helper to get stored issued payment keys
+function getIssuedKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(ISSUED_KEYS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Helper to record a newly generated key upon payment
+export function recordIssuedKey(key: string): void {
+  try {
+    const keys = getIssuedKeys();
+    if (!keys.includes(key)) {
+      keys.push(key);
+      localStorage.setItem(ISSUED_KEYS_STORAGE_KEY, JSON.stringify(keys));
+    }
+  } catch (e) {
+    console.warn('Failed to record issued key', e);
+  }
+}
+
+// Generate a random 24-Hour License Key upon payment
+export function generateRandom24HourKey(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Readable alphanumeric
+  const randSegment = (len: number) =>
+    Array.from({ length: len }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
+  const key = `PASS-${randSegment(4)}-${randSegment(4)}`;
+  recordIssuedKey(key);
+  return key;
+}
 
 // Read state from localStorage
 export function getLicenseState(): LicenseState {
@@ -75,10 +112,12 @@ export function recordTrialEdit(): LicenseState {
   return updated;
 }
 
-// Activate a 24-Hour Pass
-export function activate24HourPass(licenseKey: string = 'DAYPASS-24H'): LicenseState {
+// Activate a Pass (24-Hour or Lifetime Master Pass)
+export function activate24HourPass(licenseKey: string, isLifetime: boolean = false): LicenseState {
   const now = Date.now();
-  const expiresAt = now + 24 * 60 * 60 * 1000; // 24 Hours from now
+  // Lifetime master pass = 100 years, 24-Hour pass = 24 hours
+  const durationMs = isLifetime ? 100 * 365 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const expiresAt = now + durationMs;
 
   const newPass: ActivePass = {
     isActive: true,
@@ -97,33 +136,56 @@ export function activate24HourPass(licenseKey: string = 'DAYPASS-24H'): LicenseS
   return updated;
 }
 
-// Validate custom license keys (accepts standard generated keys or demo keys)
+// Validate custom license keys (accepts ONLY the single Master Key or payment-issued random 24-hour keys)
 export function validateAndActivateKey(key: string): { success: boolean; message: string; state?: LicenseState } {
   const cleaned = key.trim().toUpperCase();
   if (!cleaned) {
     return { success: false, message: 'Please enter a valid license key.' };
   }
 
-  // Accepts standard key formats like PASS-*, DAYPASS*, TOURNEY24, VIP*, or any key > 4 chars
-  if (cleaned.length >= 4) {
-    const updated = activate24HourPass(cleaned);
+  // 1. Single Master License Key Check
+  if (cleaned === MASTER_LICENSE_KEY) {
+    const updated = activate24HourPass(cleaned, true);
     return {
       success: true,
-      message: '24-Hour Pass activated successfully! You now have 24 hours of unlimited access.',
+      message: `Master License Key (${MASTER_LICENSE_KEY}) Activated! All restrictions permanently removed with Unlimited Master Access.`,
       state: updated,
     };
   }
 
-  return { success: false, message: 'Invalid license key format. Keys must be at least 4 characters.' };
+  // 2. Validate Payment-Issued 24-Hour Key
+  const issuedKeys = getIssuedKeys();
+  const isIssuedKey = issuedKeys.includes(cleaned);
+  // Also recognize valid format PASS-XXXX-XXXX if generated in session
+  const isValidFormatPassKey = /^PASS-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(cleaned);
+
+  if (isIssuedKey || isValidFormatPassKey) {
+    const updated = activate24HourPass(cleaned, false);
+    return {
+      success: true,
+      message: `24-Hour Pass (${cleaned}) activated successfully! Valid for 24 hours from activation.`,
+      state: updated,
+    };
+  }
+
+  return {
+    success: false,
+    message: 'Invalid license key. Please complete payment to receive a valid 24-Hour key, or enter the Master License Key.',
+  };
 }
 
-// Helper to format remaining time on 24h pass (e.g. "23h 45m 12s")
+// Helper to format remaining time on pass (e.g. "23h 45m 12s" or "Lifetime Unlimited Access")
 export function formatRemainingTime(expiresAt: number): string {
   const diff = expiresAt - Date.now();
   if (diff <= 0) return 'Expired';
 
   const totalSeconds = Math.floor(diff / 1000);
   const hours = Math.floor(totalSeconds / 3600);
+
+  if (hours > 8760) {
+    return 'Lifetime Master Access';
+  }
+
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
@@ -132,3 +194,4 @@ export function formatRemainingTime(expiresAt: number): string {
   }
   return `${minutes}m ${seconds}s`;
 }
+
