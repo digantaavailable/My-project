@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@media print {
+  /* Hide everything by default */
+  body > * {
+    visibility: hidden;
+  }
+
+  /* Make main container and bracket visible */
+  main,
+  .bracket-outer-wrapper,
+  #bracket-canvas,
+  #bracket-canvas * {
+    visibility: visible !important;
+  }
+
+  /* Clean white page background */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Completely hide controls, headers, modals, and export-ignore UI */
+  header,
+  nav,
+  footer,
+  .print\:hidden,
+  [data-export-ignore="true"] {
+    display: none !important;
+  }
+
+  /* Position main at top left for standard print sheet */
+  main {
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Remove outer box styling on bracket wrapper */
+  .bracket-outer-wrapper {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  /* Target bracket canvas specifically */
+  #bracket-canvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    margin: 0 auto !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+
+  @page {
+    size: auto;
+    margin: 10mm;
+  }
+}
+

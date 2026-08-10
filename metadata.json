@@ -1,0 +1,6 @@
+{
+  "name": "Tournament Draw Generator",
+  "description": "Generate and export editable single-elimination tournament draw brackets with Word docx, PDF, and image export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
