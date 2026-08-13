@@ -148,7 +148,7 @@ export function validateAndActivateKey(key: string): { success: boolean; message
     const updated = activate24HourPass(cleaned, true);
     return {
       success: true,
-      message: `Master License Key (${MASTER_LICENSE_KEY}) Activated! All restrictions permanently removed with Unlimited Master Access.`,
+      message: 'License Key Activated! All restrictions removed with Unlimited Access.',
       state: updated,
     };
   }
@@ -170,11 +170,11 @@ export function validateAndActivateKey(key: string): { success: boolean; message
 
   return {
     success: false,
-    message: 'Invalid license key. Please complete payment to receive a valid 24-Hour key, or enter the Master License Key.',
+    message: 'Invalid license key. Please complete payment to receive a valid 24-Hour Pass key.',
   };
 }
 
-// Helper to format remaining time on pass (e.g. "23h 45m 12s" or "Lifetime Unlimited Access")
+// Helper to format remaining time on pass (e.g. "23h 45m 12s" or "Unlimited Access")
 export function formatRemainingTime(expiresAt: number): string {
   const diff = expiresAt - Date.now();
   if (diff <= 0) return 'Expired';
@@ -183,7 +183,7 @@ export function formatRemainingTime(expiresAt: number): string {
   const hours = Math.floor(totalSeconds / 3600);
 
   if (hours > 8760) {
-    return 'Lifetime Master Access';
+    return 'Unlimited Access';
   }
 
   const minutes = Math.floor((totalSeconds % 3600) / 60);

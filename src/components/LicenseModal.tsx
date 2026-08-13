@@ -5,7 +5,6 @@ import {
   activate24HourPass,
   formatRemainingTime,
   generateRandom24HourKey,
-  MASTER_LICENSE_KEY,
 } from '../utils/license';
 import {
   Key,
@@ -17,12 +16,17 @@ import {
   Lock,
   Sparkles,
   X,
-  QrCode,
   Copy,
   ExternalLink,
   Mail,
   CheckCircle2,
   QrCode as QrIcon,
+  CreditCard,
+  Building2,
+  Wallet,
+  Shield,
+  Loader2,
+  ArrowRight,
 } from 'lucide-react';
 
 interface LicenseModalProps {
@@ -41,16 +45,21 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   const UPI_ID = 'digantaavailable@oksbi';
   const PASS_PRICE_INR = '300'; // ₹300 per 24 hours
 
-  const [activeTab, setActiveTab] = useState<'upi' | 'key'>('upi');
+  const [activeTab, setActiveTab] = useState<'gateway' | 'upi_qr' | 'key'>('gateway');
+  const [gatewayMethod, setGatewayMethod] = useState<'upi' | 'card' | 'netbanking' | 'wallet'>('upi');
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userPhone, setUserPhone] = useState('');
   const [utrNumber, setUtrNumber] = useState('');
+  const [upiVpa, setUpiVpa] = useState('');
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [copiedGeneratedKey, setCopiedGeneratedKey] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isVerifyingUpi, setIsVerifyingUpi] = useState(false);
+  const [isProcessingGateway, setIsProcessingGateway] = useState(false);
+  const [gatewayStep, setGatewayStep] = useState<'idle' | 'checkout' | 'processing' | 'success'>('idle');
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -122,6 +131,135 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       );
       onUpdateLicense(newState);
     }, 1200);
+  };
+
+  const handleStartGatewayCheckout = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    if (!userEmail.trim() || !userEmail.includes('@')) {
+      setErrorMsg('Please enter a valid email address to receive your payment receipt & 24-Hour key.');
+      return;
+    }
+
+    setGatewayStep('checkout');
+  };
+
+  const handleExecuteGatewayPayment = async () => {
+    setGatewayStep('processing');
+    setIsProcessingGateway(true);
+    setErrorMsg(null);
+
+    try {
+      // 1. Create order via backend Express API
+      const orderRes = await fetch('/api/razorpay/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount: Number(PASS_PRICE_INR),
+          email: userEmail,
+        }),
+      });
+
+      const order = await orderRes.json();
+
+      if (!orderRes.ok) {
+        throw new Error(order.error || 'Failed to initialize payment gateway order.');
+      }
+
+      // 2. Check if real Razorpay keys are configured & Razorpay Checkout script is loaded
+      if (!order.isSimulation && order.keyId && (window as any).Razorpay) {
+        setIsProcessingGateway(false);
+
+        const options = {
+          key: order.keyId,
+          amount: order.amount,
+          currency: order.currency || 'INR',
+          name: 'Tournament Draw Pro',
+          description: '24-Hour Unlimited Pass',
+          order_id: order.id,
+          prefill: {
+            email: userEmail,
+            contact: userPhone || '',
+          },
+          theme: {
+            color: '#2563eb',
+          },
+          handler: async function (response: any) {
+            setIsProcessingGateway(true);
+            setGatewayStep('processing');
+
+            // 3. Verify Razorpay signature on backend
+            const verifyRes = await fetch('/api/razorpay/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                userEmail,
+              }),
+            });
+
+            const verifyData = await verifyRes.json();
+
+            if (verifyData.success && verifyData.key) {
+              const newState = activate24HourPass(verifyData.key, false);
+              setIsProcessingGateway(false);
+              setGatewayStep('success');
+              setIssuedKey(verifyData.key);
+              setSuccessMsg(
+                `Payment of ₹${PASS_PRICE_INR} verified via Razorpay! Your 24-Hour Pass Key (${verifyData.key}) has been activated.`
+              );
+              onUpdateLicense(newState);
+            } else {
+              setIsProcessingGateway(false);
+              setGatewayStep('idle');
+              setErrorMsg(verifyData.message || 'Payment signature verification failed.');
+            }
+          },
+          modal: {
+            ondismiss: function () {
+              setIsProcessingGateway(false);
+              setGatewayStep('idle');
+            },
+          },
+        };
+
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
+      } else {
+        // Simulation mode (if keys aren't set in environment yet)
+        setTimeout(async () => {
+          const verifyRes = await fetch('/api/razorpay/verify-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              isSimulation: true,
+              userEmail,
+            }),
+          });
+          const verifyData = await verifyRes.json();
+
+          const generatedKey = verifyData.key || generateRandom24HourKey();
+          const newState = activate24HourPass(generatedKey, false);
+
+          setIsProcessingGateway(false);
+          setGatewayStep('success');
+          setIssuedKey(generatedKey);
+          setSuccessMsg(
+            `Payment of ₹${PASS_PRICE_INR} verified! Your 24-Hour Pass Key (${generatedKey}) has been activated and registered.`
+          );
+          onUpdateLicense(newState);
+        }, 1500);
+      }
+    } catch (err: any) {
+      console.error('Payment Error:', err);
+      setIsProcessingGateway(false);
+      setGatewayStep('idle');
+      setErrorMsg(err.message || 'Payment processing encountered an error.');
+    }
   };
 
   return (
@@ -254,36 +392,188 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             </div>
           )}
 
-          {/* Tabs: UPI Payment vs Existing Key */}
-          <div className="flex border-b border-slate-200">
+          {/* Tabs: Payment Gateway vs UPI QR vs License Key */}
+          <div className="flex border-b border-slate-200 overflow-x-auto">
             <button
               type="button"
-              onClick={() => setActiveTab('upi')}
-              className={`pb-2 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
-                activeTab === 'upi'
+              onClick={() => setActiveTab('gateway')}
+              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'gateway'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Zap className="w-4 h-4 text-amber-500" />
+              Payment Gateway (Instant Key)
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('upi_qr')}
+              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === 'upi_qr'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
               <QrIcon className="w-4 h-4" />
-              Pay via UPI (₹{PASS_PRICE_INR} / 24 Hours)
+              UPI QR Code
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('key')}
-              className={`pb-2 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
                 activeTab === 'key'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
               <Key className="w-4 h-4" />
-              Redeem License Key
+              Redeem Key
             </button>
           </div>
 
-          {activeTab === 'upi' ? (
-            /* UPI Payment Section */
+          {activeTab === 'gateway' && (
+            /* Integrated Payment Gateway Section */
+            <form onSubmit={handleStartGatewayCheckout} className="space-y-4">
+              <div className="bg-gradient-to-r from-blue-900 to-slate-900 text-white rounded-xl p-4 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] uppercase tracking-wider text-blue-300 font-bold flex items-center gap-1">
+                    <Shield className="w-3.5 h-3.5" /> Razorpay / Universal Gateway
+                  </span>
+                  <span className="bg-emerald-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                    INSTANT AUTOMATED KEY
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <h3 className="text-lg font-extrabold">24-Hour Pass Access</h3>
+                    <p className="text-xs text-blue-200">Unlimited tournament draw creation & updates</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xl font-black text-amber-400">₹{PASS_PRICE_INR}</div>
+                    <div className="text-[10px] text-slate-300">INC. ALL TAXES</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Method Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 block">Select Payment Method:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGatewayMethod('upi')}
+                    className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                      gatewayMethod === 'upi'
+                        ? 'border-blue-600 bg-blue-50/80 ring-1 ring-blue-600'
+                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                    }`}
+                  >
+                    <Zap className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'upi' ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">UPI Instant</div>
+                      <div className="text-[10px] text-slate-500">GPay, PhonePe, Paytm</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGatewayMethod('card')}
+                    className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                      gatewayMethod === 'card'
+                        ? 'border-blue-600 bg-blue-50/80 ring-1 ring-blue-600'
+                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                    }`}
+                  >
+                    <CreditCard className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'card' ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Debit / Credit Card</div>
+                      <div className="text-[10px] text-slate-500">Visa, Mastercard, RuPay</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGatewayMethod('netbanking')}
+                    className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                      gatewayMethod === 'netbanking'
+                        ? 'border-blue-600 bg-blue-50/80 ring-1 ring-blue-600'
+                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                    }`}
+                  >
+                    <Building2 className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'netbanking' ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Net Banking</div>
+                      <div className="text-[10px] text-slate-500">SBI, HDFC, ICICI, Axis</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setGatewayMethod('wallet')}
+                    className={`p-3 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                      gatewayMethod === 'wallet'
+                        ? 'border-blue-600 bg-blue-50/80 ring-1 ring-blue-600'
+                        : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+                    }`}
+                  >
+                    <Wallet className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'wallet' ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">Wallets</div>
+                      <div className="text-[10px] text-slate-500">Paytm, Mobikwik</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Email & Phone Details */}
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Your Email Address (For Instant Key Delivery & Receipt)
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={userEmail}
+                    onChange={(e) => setUserEmail(e.target.value)}
+                    placeholder="e.g., player@gmail.com"
+                    className="w-full text-xs border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                    Mobile Number (Optional - for SMS Receipt)
+                  </label>
+                  <input
+                    type="tel"
+                    value={userPhone}
+                    onChange={(e) => setUserPhone(e.target.value)}
+                    placeholder="e.g., 9876543210"
+                    className="w-full text-xs border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-3 px-4 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Zap className="w-4 h-4 text-amber-300" />
+                Proceed to Pay ₹{PASS_PRICE_INR} via Payment Gateway
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500 pt-1">
+                <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                <span>256-Bit SSL Encrypted & PCI-DSS Bank Grade Security</span>
+              </div>
+            </form>
+          )}
+
+          {activeTab === 'upi_qr' && (
+            /* UPI QR Payment Section */
             <div className="space-y-4">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -310,7 +600,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                         <button
                           type="button"
                           onClick={handleCopyUpi}
-                          className="ml-2 text-blue-600 hover:text-blue-800 flex items-center gap-1 font-sans text-xs"
+                          className="ml-2 text-blue-600 hover:text-blue-800 flex items-center gap-1 font-sans text-xs cursor-pointer"
                         >
                           <Copy className="w-3.5 h-3.5" />
                           {copiedUpi ? 'Copied' : 'Copy'}
@@ -387,7 +677,9 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 </button>
               </form>
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'key' && (
             /* Existing License Key Form */
             <form onSubmit={handleActivateKey} className="space-y-3">
               <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
@@ -399,7 +691,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                   type="text"
                   value={licenseKeyInput}
                   onChange={(e) => setLicenseKeyInput(e.target.value)}
-                  placeholder={`e.g., ${MASTER_LICENSE_KEY} or PASS-8F2K-9M3Q`}
+                  placeholder="e.g., PASS-8F2K-9M3Q"
                   className="flex-1 text-xs font-mono uppercase border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
                 />
                 <button
@@ -410,7 +702,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 </button>
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Enter the Master License Key (<strong>{MASTER_LICENSE_KEY}</strong>) for lifetime access, or a payment-generated 24-Hour Pass key (valid for 24 hours after activation).
+                Enter your payment-generated 24-Hour Pass key (valid for 24 hours from activation).
               </p>
             </form>
           )}
@@ -419,6 +711,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         {/* Footer */}
         <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-end">
           <button
+            type="button"
             onClick={onClose}
             className="text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 px-4 py-2 rounded-lg border border-slate-300 transition cursor-pointer"
           >
@@ -426,6 +719,152 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Razorpay Interactive Gateway Overlay Modal */}
+      {(gatewayStep === 'checkout' || gatewayStep === 'processing') && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Gateway Header */}
+            <div className="bg-blue-600 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-amber-300" />
+                <div>
+                  <h3 className="font-extrabold text-sm tracking-wide">Razorpay Gateway</h3>
+                  <p className="text-[10px] text-blue-100">Tournament Draw Pro • Secure Checkout</p>
+                </div>
+              </div>
+              {gatewayStep !== 'processing' && (
+                <button
+                  type="button"
+                  onClick={() => setGatewayStep('idle')}
+                  className="text-white/80 hover:text-white p-1 rounded transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Gateway Body */}
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex items-center justify-between text-xs">
+                <div>
+                  <div className="text-slate-500 text-[10px]">Paying to</div>
+                  <div className="font-bold text-slate-900">Tournament Draw Access</div>
+                  <div className="text-[10px] text-blue-600">{userEmail}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-slate-500 text-[10px]">Amount</div>
+                  <div className="text-lg font-black text-slate-900">₹{PASS_PRICE_INR}.00</div>
+                </div>
+              </div>
+
+              {gatewayStep === 'processing' ? (
+                <div className="py-8 text-center space-y-3">
+                  <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-slate-900">Processing Payment...</h4>
+                    <p className="text-xs text-slate-500">Connecting to Bank & Issuing 24H Pass Key</p>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
+                    <Shield className="w-3 h-3 text-emerald-600" /> Do not close or refresh this window
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  {gatewayMethod === 'upi' && (
+                    <div className="space-y-2">
+                      <label className="font-semibold text-slate-700 block">Enter UPI ID / VPA (Optional):</label>
+                      <input
+                        type="text"
+                        value={upiVpa}
+                        onChange={(e) => setUpiVpa(e.target.value)}
+                        placeholder="e.g., mobile@upi or username@okicici"
+                        className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none"
+                      />
+                      <p className="text-[10px] text-slate-500">Supports GPay, PhonePe, Paytm, BHIM or any UPI App.</p>
+                    </div>
+                  )}
+
+                  {gatewayMethod === 'card' && (
+                    <div className="space-y-2">
+                      <div>
+                        <label className="font-semibold text-slate-700 block mb-1">Card Number:</label>
+                        <input
+                          type="text"
+                          maxLength={19}
+                          placeholder="4111 •••• •••• 1111"
+                          className="w-full text-xs font-mono border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="font-semibold text-slate-700 block mb-1">Expiry (MM/YY):</label>
+                          <input
+                            type="text"
+                            maxLength={5}
+                            placeholder="12/28"
+                            className="w-full text-xs font-mono border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-semibold text-slate-700 block mb-1">CVV:</label>
+                          <input
+                            type="password"
+                            maxLength={4}
+                            placeholder="•••"
+                            className="w-full text-xs font-mono border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {gatewayMethod === 'netbanking' && (
+                    <div className="space-y-2">
+                      <label className="font-semibold text-slate-700 block">Select Bank:</label>
+                      <select className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none">
+                        <option value="sbi">State Bank of India (SBI)</option>
+                        <option value="hdfc">HDFC Bank</option>
+                        <option value="icici">ICICI Bank</option>
+                        <option value="axis">Axis Bank</option>
+                        <option value="kotak">Kotak Mahindra Bank</option>
+                        <option value="pnb">Punjab National Bank</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {gatewayMethod === 'wallet' && (
+                    <div className="space-y-2">
+                      <label className="font-semibold text-slate-700 block">Select Wallet:</label>
+                      <select className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none">
+                        <option value="paytm">Paytm Wallet</option>
+                        <option value="phonepe">PhonePe Wallet</option>
+                        <option value="mobikwik">MobiKwik Wallet</option>
+                        <option value="amazon">Amazon Pay Wallet</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleExecuteGatewayPayment}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs py-3 px-4 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  >
+                    <Shield className="w-4 h-4 text-amber-300" />
+                    Pay ₹{PASS_PRICE_INR}.00 Now
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Gateway Footer */}
+            <div className="bg-slate-100 px-4 py-2.5 border-t border-slate-200 text-center text-[10px] text-slate-500 flex items-center justify-between">
+              <span>Secured by Razorpay</span>
+              <span>PCI-DSS Compliant</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
