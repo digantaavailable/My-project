@@ -29,12 +29,13 @@ export const LicenseBadge: React.FC<LicenseBadgeProps> = ({ licenseState, onOpen
 
   if (isActive && licenseState.activePass) {
     const timeLeftStr = formatRemainingTime(licenseState.activePass.expiresAt);
+    const isLifetime = timeLeftStr.includes('Lifetime') || (licenseState.activePass.expiresAt - now > 8760 * 3600 * 1000);
 
     return (
       <button
         onClick={onOpenModal}
-        className="flex items-center gap-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-200 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shadow-xs group"
-        title="24-Hour Pass Active - Click to manage"
+        className="flex items-center gap-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-200 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shadow-xs group cursor-pointer"
+        title="Pass Active - Click to manage"
       >
         <span className="relative flex h-2 w-2">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -43,7 +44,7 @@ export const LicenseBadge: React.FC<LicenseBadgeProps> = ({ licenseState, onOpen
         <ShieldCheck className="w-4 h-4 text-emerald-400" />
         <span className="font-mono text-emerald-300 font-bold">{timeLeftStr}</span>
         <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 font-sans uppercase tracking-wider">
-          24h Pass
+          {isLifetime ? 'Lifetime' : '24h Pass'}
         </span>
       </button>
     );

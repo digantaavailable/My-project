@@ -15,7 +15,15 @@ const LICENSE_STORAGE_KEY = 'tournament_draw_license_v1';
 const ISSUED_KEYS_STORAGE_KEY = 'tournament_draw_issued_keys_v1';
 export const MAX_TRIAL_EDITS = 5;
 
-// Official Single Master License Key
+// Official Owner Lifetime License Keys (Only for the Owner of the application)
+export const OWNER_LIFETIME_KEYS = [
+  'MASTER2026',
+  'DIGANTA2026',
+  'OWNER-LIFETIME-MASTER',
+  'LIFE-OWNER-2026',
+  'OWNER2026',
+];
+
 export const MASTER_LICENSE_KEY = 'MASTER2026';
 
 // Helper to get stored issued payment keys
@@ -136,19 +144,19 @@ export function activate24HourPass(licenseKey: string, isLifetime: boolean = fal
   return updated;
 }
 
-// Validate custom license keys (accepts ONLY the single Master Key or payment-issued random 24-hour keys)
+// Validate custom license keys (accepts Owner Lifetime Keys or payment-issued random 24-hour keys)
 export function validateAndActivateKey(key: string): { success: boolean; message: string; state?: LicenseState } {
   const cleaned = key.trim().toUpperCase();
   if (!cleaned) {
     return { success: false, message: 'Please enter a valid license key.' };
   }
 
-  // 1. Single Master License Key Check
-  if (cleaned === MASTER_LICENSE_KEY) {
+  // 1. Owner Lifetime License Key Check (Only for application owner)
+  if (OWNER_LIFETIME_KEYS.includes(cleaned) || cleaned.startsWith('OWNER-LIFE-')) {
     const updated = activate24HourPass(cleaned, true);
     return {
       success: true,
-      message: 'License Key Activated! All restrictions removed with Unlimited Access.',
+      message: 'Owner Lifetime License Key Activated! Permanent Unlimited Access is active.',
       state: updated,
     };
   }
@@ -163,14 +171,14 @@ export function validateAndActivateKey(key: string): { success: boolean; message
     const updated = activate24HourPass(cleaned, false);
     return {
       success: true,
-      message: `24-Hour Pass (${cleaned}) activated successfully! Valid for 24 hours from activation.`,
+      message: '24-Hour Pass activated successfully! Valid for 24 hours from activation.',
       state: updated,
     };
   }
 
   return {
     success: false,
-    message: 'Invalid license key. Please complete payment to receive a valid 24-Hour Pass key.',
+    message: 'Invalid license key. Please check your key or complete payment for a 24-Hour Pass.',
   };
 }
 
@@ -183,7 +191,7 @@ export function formatRemainingTime(expiresAt: number): string {
   const hours = Math.floor(totalSeconds / 3600);
 
   if (hours > 8760) {
-    return 'Unlimited Access';
+    return 'Unlimited Lifetime Access';
   }
 
   const minutes = Math.floor((totalSeconds % 3600) / 60);

@@ -11,16 +11,12 @@ import {
   ShieldCheck,
   Clock,
   Zap,
-  Check,
   AlertCircle,
   Lock,
   Sparkles,
   X,
   Copy,
-  ExternalLink,
-  Mail,
   CheckCircle2,
-  QrCode as QrIcon,
   CreditCard,
   Building2,
   Wallet,
@@ -42,22 +38,19 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   licenseState,
   onUpdateLicense,
 }) => {
-  const UPI_ID = 'digantaavailable@oksbi';
-  const PASS_PRICE_INR = '300'; // ₹300 per 24 hours
+  const PASS_PRICE_INR = '300'; // ₹300 per 24-Hour Day Pass
 
-  const [activeTab, setActiveTab] = useState<'gateway' | 'upi_qr' | 'key'>('gateway');
+  // Only two tabs: Payment Gateway (24-Hour Pass) & Redeem Key
+  const [activeTab, setActiveTab] = useState<'gateway' | 'key'>('gateway');
   const [gatewayMethod, setGatewayMethod] = useState<'upi' | 'card' | 'netbanking' | 'wallet'>('upi');
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userPhone, setUserPhone] = useState('');
-  const [utrNumber, setUtrNumber] = useState('');
   const [upiVpa, setUpiVpa] = useState('');
-  const [copiedUpi, setCopiedUpi] = useState(false);
   const [copiedGeneratedKey, setCopiedGeneratedKey] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [isVerifyingUpi, setIsVerifyingUpi] = useState(false);
   const [isProcessingGateway, setIsProcessingGateway] = useState(false);
   const [gatewayStep, setGatewayStep] = useState<'idle' | 'checkout' | 'processing' | 'success'>('idle');
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
@@ -65,21 +58,11 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   if (!isOpen) return null;
 
   const isActive = !!(licenseState.activePass && Date.now() < licenseState.activePass.expiresAt);
+  const isLifetime = !!(
+    licenseState.activePass &&
+    licenseState.activePass.expiresAt - Date.now() > 8760 * 3600 * 1000
+  );
   const trialEditsLeft = Math.max(0, licenseState.maxTrialEdits - licenseState.trialEditsUsed);
-
-  const upiPayLink = `upi://pay?pa=${encodeURIComponent(UPI_ID)}&pn=${encodeURIComponent(
-    'Tournament Draw 24H Pass'
-  )}&am=${PASS_PRICE_INR}&cu=INR`;
-
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(
-    upiPayLink
-  )}`;
-
-  const handleCopyUpi = () => {
-    navigator.clipboard.writeText(UPI_ID);
-    setCopiedUpi(true);
-    setTimeout(() => setCopiedUpi(false), 2000);
-  };
 
   const handleCopyGeneratedKey = (key: string) => {
     navigator.clipboard.writeText(key);
@@ -102,37 +85,6 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     }
   };
 
-  const handleConfirmUpiPayment = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    if (!userEmail.trim() || !userEmail.includes('@')) {
-      setErrorMsg('Please enter a valid email address to receive your 24-Hour Pass key.');
-      return;
-    }
-
-    if (!utrNumber.trim() || utrNumber.trim().length < 6) {
-      setErrorMsg('Please enter a valid 12-digit UPI UTR / Transaction Reference number.');
-      return;
-    }
-
-    setIsVerifyingUpi(true);
-
-    // Backend simulation: Generate unique random 24-hour key upon payment verification
-    setTimeout(() => {
-      const generatedKey = generateRandom24HourKey();
-      const newState = activate24HourPass(generatedKey, false);
-
-      setIsVerifyingUpi(false);
-      setIssuedKey(generatedKey);
-      setSuccessMsg(
-        `Payment verified! Your random 24-Hour Pass key (${generatedKey}) has been generated, activated for 24 hours, and sent to ${userEmail}.`
-      );
-      onUpdateLicense(newState);
-    }, 1200);
-  };
-
   const handleStartGatewayCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -144,7 +96,6 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       return;
     }
 
-    // Direct launch into payment execution
     await executePaymentFlow(emailTrimmed);
   };
 
@@ -218,7 +169,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             const newState = activate24HourPass(finalKey, false);
             setIsProcessingGateway(false);
             setIssuedKey(finalKey);
-            setSuccessMsg(`Payment of ₹${PASS_PRICE_INR} verified! Your 24-Hour Pass (${finalKey}) is now active.`);
+            setSuccessMsg(`Payment of ₹${PASS_PRICE_INR} verified! Your 24-Hour Pass has been activated.`);
             onUpdateLicense(newState);
           },
           modal: {
@@ -257,7 +208,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       setGatewayStep('success');
       setIssuedKey(generatedKey);
       setSuccessMsg(
-        `Payment of ₹${PASS_PRICE_INR} confirmed! Your 24-Hour Pass Key (${generatedKey}) has been activated and registered to ${emailTrimmed}.`
+        `Payment of ₹${PASS_PRICE_INR} confirmed! Your 24-Hour Pass has been activated and sent to ${emailTrimmed}.`
       );
       onUpdateLicense(newState);
     }, 1200);
@@ -277,7 +228,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 24-Hour Pass & License Access
               </h2>
               <p className="text-xs text-slate-400">
-                UPI Payment & Instant 24-Hour Email Key Delivery
+                Unlock Unlimited Tournament Draw Creation & Editing
               </p>
             </div>
           </div>
@@ -297,31 +248,19 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
               <Sparkles className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm text-emerald-900">24-Hour Day Pass Active</span>
+                  <span className="font-bold text-sm text-emerald-900">
+                    {isLifetime ? 'Owner Lifetime Access Active' : '24-Hour Day Pass Active'}
+                  </span>
                   <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                     UNLIMITED ACCESS
                   </span>
                 </div>
                 <p className="text-xs text-emerald-800 mt-1">
-                  Time Remaining:{' '}
+                  Status:{' '}
                   <strong className="font-mono text-emerald-950 font-bold">
                     {formatRemainingTime(licenseState.activePass.expiresAt)}
                   </strong>
                 </p>
-                <div className="mt-2 flex items-center gap-2 bg-emerald-100/70 p-2 rounded-lg border border-emerald-200">
-                  <span className="text-[11px] text-emerald-800 font-medium">Activated Key:</span>
-                  <code className="font-mono text-xs font-bold bg-white px-2 py-0.5 rounded border border-emerald-300 text-emerald-950">
-                    {licenseState.activePass.licenseKey}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyGeneratedKey(licenseState.activePass?.licenseKey || '')}
-                    className="ml-auto text-xs text-emerald-700 hover:text-emerald-900 font-semibold flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />
-                    {copiedGeneratedKey ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
               </div>
             </div>
           ) : (
@@ -356,7 +295,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 <p className="text-xs mt-1 leading-relaxed">
                   {trialEditsLeft > 0
                     ? `You are in free trial mode (${trialEditsLeft} edits left). Get a 24-Hour Pass for unlimited updates across devices.`
-                    : 'Your 5 trial edits are complete. Get a 24-Hour Pass via UPI to unlock unlimited tournament draw edits.'}
+                    : 'Your 5 trial edits are complete. Get a 24-Hour Pass to unlock unlimited tournament draw edits.'}
                 </p>
               </div>
             </div>
@@ -377,12 +316,12 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 <span>{successMsg}</span>
                 {issuedKey && (
                   <div className="mt-2 p-2 bg-white rounded border border-emerald-300 flex items-center justify-between">
-                    <span className="text-[11px] text-slate-500">Your 24H Key:</span>
+                    <span className="text-[11px] text-slate-500">Your 24H Pass Key:</span>
                     <strong className="font-mono text-xs text-slate-900">{issuedKey}</strong>
                     <button
                       type="button"
                       onClick={() => handleCopyGeneratedKey(issuedKey)}
-                      className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold flex items-center gap-1"
+                      className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <Copy className="w-3 h-3" />
                       {copiedGeneratedKey ? 'Copied' : 'Copy'}
@@ -393,36 +332,24 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             </div>
           )}
 
-          {/* Tabs: Payment Gateway vs UPI QR vs License Key */}
-          <div className="flex border-b border-slate-200 overflow-x-auto">
+          {/* Tabs: Payment Gateway vs Redeem Key */}
+          <div className="flex border-b border-slate-200">
             <button
               type="button"
               onClick={() => setActiveTab('gateway')}
-              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
+              className={`flex-1 pb-2.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'gateway'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
               <Zap className="w-4 h-4 text-amber-500" />
-              Payment Gateway (Instant Key)
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('upi_qr')}
-              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
-                activeTab === 'upi_qr'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <QrIcon className="w-4 h-4" />
-              UPI QR Code
+              Payment Gateway (24-Hour Pass)
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('key')}
-              className={`pb-2.5 px-3 text-xs font-bold border-b-2 transition flex items-center gap-1.5 whitespace-nowrap ${
+              className={`flex-1 pb-2.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 cursor-pointer ${
                 activeTab === 'key'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -434,20 +361,20 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
           </div>
 
           {activeTab === 'gateway' && (
-            /* Integrated Payment Gateway Section */
+            /* Integrated Payment Gateway Section (Only 24-Hour Pass option) */
             <form onSubmit={handleStartGatewayCheckout} noValidate className="space-y-4">
               <div className="bg-gradient-to-r from-blue-900 to-slate-900 text-white rounded-xl p-4 shadow-xs">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] uppercase tracking-wider text-blue-300 font-bold flex items-center gap-1">
-                    <Shield className="w-3.5 h-3.5" /> Razorpay / Universal Gateway
+                    <Shield className="w-3.5 h-3.5" /> Razorpay / Instant Gateway
                   </span>
                   <span className="bg-emerald-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                    INSTANT AUTOMATED KEY
+                    INSTANT 24H ACCESS
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between">
                   <div>
-                    <h3 className="text-lg font-extrabold">24-Hour Pass Access</h3>
+                    <h3 className="text-lg font-extrabold">24-Hour Day Pass</h3>
                     <p className="text-xs text-blue-200">Unlimited tournament draw creation & updates</p>
                   </div>
                   <div className="text-right">
@@ -473,7 +400,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     <Zap className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'upi' ? 'text-blue-600' : 'text-slate-400'}`} />
                     <div>
                       <div className="text-xs font-bold text-slate-900">UPI Instant</div>
-                      <div className="text-[10px] text-slate-500">GPay, PhonePe, Paytm</div>
+                      <div className="text-[10px] text-slate-500">GPay, PhonePe, Paytm, BHIM</div>
                     </div>
                   </button>
 
@@ -521,7 +448,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     <Wallet className={`w-4 h-4 mt-0.5 ${gatewayMethod === 'wallet' ? 'text-blue-600' : 'text-slate-400'}`} />
                     <div>
                       <div className="text-xs font-bold text-slate-900">Wallets</div>
-                      <div className="text-[10px] text-slate-500">Paytm, Mobikwik</div>
+                      <div className="text-[10px] text-slate-500">Paytm, Mobikwik, Amazon Pay</div>
                     </div>
                   </button>
                 </div>
@@ -531,14 +458,14 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
               <div className="space-y-2">
                 <div>
                   <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                    Your Email Address (For Instant Key Delivery & Receipt)
+                    Your Email Address (For Key Delivery & Order Receipt)
                   </label>
                   <input
                     type="text"
                     inputMode="email"
                     value={userEmail}
                     onChange={(e) => setUserEmail(e.target.value)}
-                    placeholder="e.g., player@gmail.com"
+                    placeholder="Enter your email address"
                     className="w-full text-xs border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
                   />
                 </div>
@@ -552,7 +479,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     inputMode="numeric"
                     value={userPhone}
                     onChange={(e) => setUserPhone(e.target.value)}
-                    placeholder="e.g., 9876543210"
+                    placeholder="Enter 10-digit mobile number"
                     className="w-full text-xs border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
                   />
                 </div>
@@ -563,7 +490,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-3 px-4 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Zap className="w-4 h-4 text-amber-300" />
-                Proceed to Pay ₹{PASS_PRICE_INR} via Payment Gateway
+                Proceed to Pay ₹{PASS_PRICE_INR} for 24-Hour Pass
                 <ArrowRight className="w-4 h-4" />
               </button>
 
@@ -574,138 +501,36 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             </form>
           )}
 
-          {activeTab === 'upi_qr' && (
-            /* UPI QR Payment Section */
-            <div className="space-y-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="flex flex-col sm:flex-row items-center gap-4">
-                  {/* QR Code */}
-                  <div className="bg-white p-2 border border-slate-300 rounded-xl shadow-xs flex flex-col items-center flex-shrink-0">
-                    <img
-                      src={qrCodeUrl}
-                      alt="UPI Payment QR Code"
-                      className="w-36 h-36 rounded-md object-contain"
-                    />
-                    <span className="text-[10px] text-slate-500 mt-1 font-medium">
-                      Scan with GPay / PhonePe / Paytm
-                    </span>
-                  </div>
-
-                  {/* Payment Info */}
-                  <div className="flex-1 space-y-2 text-center sm:text-left">
-                    <div>
-                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                        Official Payment UPI ID
-                      </span>
-                      <div className="mt-1 flex items-center justify-between bg-white border border-slate-300 rounded-lg p-2 font-mono text-xs text-slate-900 font-bold">
-                        <span>{UPI_ID}</span>
-                        <button
-                          type="button"
-                          onClick={handleCopyUpi}
-                          className="ml-2 text-blue-600 hover:text-blue-800 flex items-center gap-1 font-sans text-xs cursor-pointer"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                          {copiedUpi ? 'Copied' : 'Copy'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-slate-600 space-y-1">
-                      <p>
-                        <strong>Amount:</strong> ₹{PASS_PRICE_INR} INR for 24-Hour Pass
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        Works with Google Pay, PhonePe, Paytm, BHIM or any UPI app.
-                      </p>
-                    </div>
-
-                    <a
-                      href={upiPayLink}
-                      className="inline-flex items-center justify-center gap-1.5 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-2 px-3 rounded-lg transition shadow-2xs"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      Open UPI App Directly (₹{PASS_PRICE_INR})
-                    </a>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Confirmation Form */}
-              <form onSubmit={handleConfirmUpiPayment} className="space-y-3 pt-1">
-                <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Mail className="w-4 h-4 text-blue-600" />
-                  Confirm Payment to Get 24-Hour Pass Key:
-                </h4>
-
-                <div className="space-y-2">
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
-                      Your Email Address (Pass key delivered here)
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={userEmail}
-                      onChange={(e) => setUserEmail(e.target.value)}
-                      placeholder="e.g., player@gmail.com"
-                      className="w-full text-xs border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
-                      12-Digit UPI UTR / Transaction Reference No.
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={utrNumber}
-                      onChange={(e) => setUtrNumber(e.target.value)}
-                      placeholder="e.g., 4218XXXXXXXX or UTR Number"
-                      className="w-full text-xs font-mono border border-slate-300 rounded-lg p-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isVerifyingUpi}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs py-2.5 px-4 rounded-lg transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-                >
-                  <Zap className="w-4 h-4" />
-                  {isVerifyingUpi
-                    ? 'Verifying Payment & Delivering Key...'
-                    : 'Verify Payment & Deliver 24H Pass Key'}
-                </button>
-              </form>
-            </div>
-          )}
-
           {activeTab === 'key' && (
-            /* Existing License Key Form */
-            <form onSubmit={handleActivateKey} className="space-y-3">
-              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-slate-500" />
-                Enter License Key:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={licenseKeyInput}
-                  onChange={(e) => setLicenseKeyInput(e.target.value)}
-                  placeholder="e.g., PASS-8F2K-9M3Q"
-                  className="flex-1 text-xs font-mono uppercase border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition flex-shrink-0 cursor-pointer"
-                >
-                  Activate Key
-                </button>
+            /* Clean Redeem License Key Form (No keys displayed or leaked) */
+            <form onSubmit={handleActivateKey} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                  <Key className="w-3.5 h-3.5 text-blue-600" />
+                  Enter License Key:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={licenseKeyInput}
+                    onChange={(e) => setLicenseKeyInput(e.target.value)}
+                    placeholder="Enter License Key"
+                    className="flex-1 text-xs font-mono uppercase border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition flex-shrink-0 cursor-pointer shadow-xs"
+                  >
+                    Activate Key
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Enter your payment-generated 24-Hour Pass key (valid for 24 hours from activation).
-              </p>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-[11px] text-slate-600 leading-relaxed">
+                <p>
+                  Enter your purchased 24-Hour Pass key or Owner License key to activate unlimited access.
+                </p>
+              </div>
             </form>
           )}
         </div>
@@ -732,7 +557,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 <Shield className="w-5 h-5 text-amber-300" />
                 <div>
                   <h3 className="font-extrabold text-sm tracking-wide">Razorpay Gateway</h3>
-                  <p className="text-[10px] text-blue-100">Tournament Draw Pro • Secure Checkout</p>
+                  <p className="text-[10px] text-blue-100">Tournament Draw Pro • 24-Hour Pass Checkout</p>
                 </div>
               </div>
               {gatewayStep !== 'processing' && (
@@ -750,8 +575,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             <div className="p-5 space-y-4">
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 flex items-center justify-between text-xs">
                 <div>
-                  <div className="text-slate-500 text-[10px]">Paying to</div>
-                  <div className="font-bold text-slate-900">Tournament Draw Access</div>
+                  <div className="text-slate-500 text-[10px]">Product</div>
+                  <div className="font-bold text-slate-900">24-Hour Pass Access</div>
                   <div className="text-[10px] text-blue-600">{userEmail}</div>
                 </div>
                 <div className="text-right">
@@ -765,7 +590,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                   <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
                   <div className="space-y-1">
                     <h4 className="text-sm font-bold text-slate-900">Processing Payment...</h4>
-                    <p className="text-xs text-slate-500">Connecting to Bank & Issuing 24H Pass Key</p>
+                    <p className="text-xs text-slate-500">Connecting to Bank & Activating 24H Pass</p>
                   </div>
                   <div className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 font-medium">
                     <Shield className="w-3 h-3 text-emerald-600" /> Do not close or refresh this window
@@ -780,7 +605,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                         type="text"
                         value={upiVpa}
                         onChange={(e) => setUpiVpa(e.target.value)}
-                        placeholder="e.g., mobile@upi or username@okicici"
+                        placeholder="e.g., yourname@upi"
                         className="w-full text-xs border border-slate-300 rounded-lg p-2.5 bg-slate-50 text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none"
                       />
                       <p className="text-[10px] text-slate-500">Supports GPay, PhonePe, Paytm, BHIM or any UPI App.</p>
@@ -870,4 +695,3 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     </div>
   );
 };
-
