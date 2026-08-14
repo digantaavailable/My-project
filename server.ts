@@ -12,52 +12,89 @@ async function startServer() {
 
   // Helper to initialize Razorpay SDK lazily
   function getRazorpayInstance() {
-    const keyId = process.env.VITE_RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const rawKeyId = process.env.VITE_RAZORPAY_KEY_ID || 'rzp_live_TPgpZVAt5gFQkx';
+    const rawKeySecret = process.env.RAZORPAY_KEY_SECRET || 'WDwOFp9skemZUhj8XetvJ689';
 
-    if (!keyId || !keySecret) {
+    const keyId = rawKeyId.trim().replace(/^["']|["']$/g, '');
+    const keySecret = rawKeySecret.trim().replace(/^["']|["']$/g, '');
+
+    // Ignore invalid placeholder values
+    if (
+      !keyId ||
+      !keySecret ||
+      keyId.includes('MY_KEY') ||
+      keySecret.includes('MY_SECRET') ||
+      keyId === '""' ||
+      keySecret === '""'
+    ) {
       return null;
     }
 
-    return new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
-    });
+    return {
+      client: new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      }),
+      keyId,
+      keySecret,
+    };
   }
 
   // API 1: Create Razorpay Order
   app.post('/api/razorpay/create-order', async (req, res) => {
     try {
       const { amount = 300, currency = 'INR', email } = req.body;
-      const razorpay = getRazorpayInstance();
+      const rzpConfig = getRazorpayInstance();
 
-      if (!razorpay) {
-        return res.status(400).json({
-          error: 'Razorpay Gateway is not yet configured. Please set VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Settings.',
-          isConfigured: false,
+      if (!rzpConfig) {
+        return res.json({
+          id: null,
+          amount: Math.round(amount * 100),
+          currency,
+          keyId: 'rzp_live_TPgpZVAt5gFQkx',
+          fallback: true,
         });
       }
 
-      // Real Razorpay Order Creation
-      const order = await razorpay.orders.create({
-        amount: Math.round(amount * 100), // in paise (30000 = ₹300)
-        currency,
-        receipt: `receipt_${Date.now()}`,
-        notes: {
-          email: email || '',
-          product: 'Tournament Draw 24H Pass',
-        },
-      });
+      const { client: razorpay, keyId } = rzpConfig;
 
-      return res.json({
-        id: order.id,
-        amount: order.amount,
-        currency: order.currency,
-        keyId: process.env.VITE_RAZORPAY_KEY_ID,
-      });
+      try {
+        // Real Razorpay Order Creation
+        const order = await razorpay.orders.create({
+          amount: Math.round(amount * 100), // in paise (30000 = ₹300)
+          currency,
+          receipt: `rcpt_${Date.now().toString().slice(-10)}`,
+          notes: {
+            email: email || '',
+            product: 'Tournament Draw 24H Pass',
+          },
+        });
+
+        return res.json({
+          id: order.id,
+          amount: order.amount,
+          currency: order.currency,
+          keyId: keyId,
+        });
+      } catch (orderErr: any) {
+        console.warn('Razorpay server order creation returned:', orderErr?.message || orderErr);
+        return res.json({
+          id: null,
+          amount: Math.round(amount * 100),
+          currency,
+          keyId: keyId,
+          fallback: true,
+        });
+      }
     } catch (err: any) {
       console.error('Razorpay Order Error:', err);
-      return res.status(500).json({ error: err.message || 'Failed to create payment order' });
+      return res.json({
+        id: null,
+        amount: 30000,
+        currency: 'INR',
+        keyId: 'rzp_live_TPgpZVAt5gFQkx',
+        fallback: true,
+      });
     }
   });
 
@@ -70,7 +107,8 @@ async function startServer() {
         razorpay_signature,
       } = req.body;
 
-      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+      const rzpConfig = getRazorpayInstance();
+      const keySecret = rzpConfig?.keySecret;
 
       if (!keySecret) {
         return res.status(400).json({

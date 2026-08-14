@@ -139,10 +139,11 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       }
 
       // Check if client has a pre-configured public key
-      const clientKeyId = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
+      const clientKeyId = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || 'rzp_live_TPgpZVAt5gFQkx';
 
       // 2. Attempt to call backend to create Razorpay Order
       let orderData: any = null;
+      let orderCreatedSuccessfully = false;
       try {
         const orderRes = await fetch('/api/razorpay/create-order', {
           method: 'POST',
@@ -155,15 +156,22 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
         if (orderRes.ok) {
           orderData = await orderRes.json();
+          orderCreatedSuccessfully = true;
         } else {
           try {
             orderData = await orderRes.json();
           } catch {
             // non-json response
           }
+          setIsProcessingGateway(false);
+          setErrorMsg(
+            orderData?.error ||
+              'Payment gateway order creation failed. Please verify your Razorpay API Keys or use the Redeem Key tab with your Master Key.'
+          );
+          return;
         }
-      } catch {
-        // backend request failed (e.g. static domain)
+      } catch (fetchErr: any) {
+        console.warn('Backend order creation fetch failed:', fetchErr);
       }
 
       const activeKey = orderData?.keyId || clientKeyId;
@@ -171,7 +179,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       if (!activeKey) {
         setIsProcessingGateway(false);
         setErrorMsg(
-          'Razorpay Gateway is not yet connected to live credentials (VITE_RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET). To use the app immediately as the owner, please click the "Redeem Key" tab and enter your Master Key.'
+          'Razorpay Gateway is not yet connected to credentials. To use the app immediately as the owner, please click the "Redeem Key" tab and enter your Master Key.'
         );
         return;
       }
@@ -247,7 +255,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       const rzp = new (window as any).Razorpay(rzpOptions);
       rzp.on('payment.failed', function (resp: any) {
         setIsProcessingGateway(false);
-        setErrorMsg(`Payment Failed: ${resp.error?.description || 'Transaction was declined.'}`);
+        const reason = resp.error?.description || 'Payment was declined or cancelled.';
+        setErrorMsg(`Payment Failed: ${reason}. In Test Mode, select "Success" on Razorpay's mock bank screen.`);
       });
 
       setIsProcessingGateway(false);
@@ -485,6 +494,12 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 <p className="text-slate-500">
                   UPI (GPay, PhonePe, Paytm, BHIM), Debit & Credit Cards (Visa, Mastercard, RuPay), Net Banking, and Wallets.
                 </p>
+                <div className="mt-2 pt-2 border-t border-slate-200 text-[10px] text-slate-500 flex items-start gap-1">
+                  <Sparkles className="w-3 h-3 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Testing note:</strong> If your Razorpay account is currently in <em>Test Mode</em>, choose any payment method and click the green <strong>"Success"</strong> button on Razorpay's simulation screen to complete the test.
+                  </span>
+                </div>
               </div>
 
               <button
