@@ -32,14 +32,9 @@ async function startServer() {
       const razorpay = getRazorpayInstance();
 
       if (!razorpay) {
-        // Fallback simulation order if keys are not set up in environment yet
-        return res.json({
-          isSimulation: true,
-          id: `order_sim_${Date.now()}`,
-          amount: amount * 100, // in paise
-          currency,
-          keyId: process.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-          message: 'Razorpay keys not detected in environment variables. Running in automated test simulation mode.',
+        return res.status(400).json({
+          error: 'Razorpay Gateway is not yet configured. Please set VITE_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Settings.',
+          isConfigured: false,
         });
       }
 
@@ -55,7 +50,6 @@ async function startServer() {
       });
 
       return res.json({
-        isSimulation: false,
         id: order.id,
         amount: order.amount,
         currency: order.currency,
@@ -74,35 +68,33 @@ async function startServer() {
         razorpay_order_id,
         razorpay_payment_id,
         razorpay_signature,
-        isSimulation,
       } = req.body;
 
       const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-      if (!isSimulation && keySecret) {
-        // Real Cryptographic HMAC SHA256 Signature Verification
-        const hmac = crypto.createHmac('sha256', keySecret);
-        hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
-        const generatedSignature = hmac.digest('hex');
-
-        if (generatedSignature !== razorpay_signature) {
-          return res.status(400).json({
-            success: false,
-            message: 'Invalid payment signature. Payment verification failed.',
-          });
-        }
+      if (!keySecret) {
+        return res.status(400).json({
+          success: false,
+          message: 'Razorpay secret key is not configured on the server.',
+        });
       }
 
-      // Generate random valid 24-Hour Pass Key upon verified payment
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      const randSegment = (len: number) =>
-        Array.from({ length: len }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
-      const generatedKey = `PASS-${randSegment(4)}-${randSegment(4)}`;
+      // Real Cryptographic HMAC SHA256 Signature Verification
+      const hmac = crypto.createHmac('sha256', keySecret);
+      hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+      const generatedSignature = hmac.digest('hex');
+
+      if (generatedSignature !== razorpay_signature) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid payment signature. Payment verification failed.',
+        });
+      }
 
       return res.json({
         success: true,
-        message: 'Payment verified successfully!',
-        key: generatedKey,
+        message: 'Payment verified successfully! 24-Hour Pass activated.',
+        paymentId: razorpay_payment_id,
       });
     } catch (err: any) {
       console.error('Razorpay Verification Error:', err);
