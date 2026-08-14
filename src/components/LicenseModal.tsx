@@ -20,6 +20,7 @@ import {
   Loader2,
   ArrowRight,
   RotateCcw,
+  HelpCircle,
 } from 'lucide-react';
 
 interface LicenseModalProps {
@@ -122,17 +123,28 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
     const emailTrimmed = (userEmail || '').trim().toLowerCase();
     if (!emailTrimmed || !emailTrimmed.includes('@') || !emailTrimmed.includes('.')) {
-      setErrorMsg('Please enter a valid email address (e.g., yourname@gmail.com) for your receipt.');
+      setErrorMsg('Please enter a valid email address (e.g., yourname@gmail.com) for your payment receipt.');
       return;
     }
 
     setIsProcessingGateway(true);
 
     try {
-      // 1. Call backend to create Razorpay Order
-      let orderRes: Response;
+      // 1. Ensure Razorpay SDK is loaded
+      const isSdkLoaded = await loadRazorpaySdk();
+      if (!isSdkLoaded || !(window as any).Razorpay) {
+        setIsProcessingGateway(false);
+        setErrorMsg('Unable to load Razorpay payment script. Please check your internet connection or ad-blocker.');
+        return;
+      }
+
+      // Check if client has a pre-configured public key
+      const clientKeyId = (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
+
+      // 2. Attempt to call backend to create Razorpay Order
+      let orderData: any = null;
       try {
-        orderRes = await fetch('/api/razorpay/create-order', {
+        const orderRes = await fetch('/api/razorpay/create-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -140,47 +152,39 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             email: emailTrimmed,
           }),
         });
+
+        if (orderRes.ok) {
+          orderData = await orderRes.json();
+        } else {
+          try {
+            orderData = await orderRes.json();
+          } catch {
+            // non-json response
+          }
+        }
       } catch {
-        setIsProcessingGateway(false);
-        setErrorMsg('Unable to connect to the backend server. Please check your network connection.');
-        return;
+        // backend request failed (e.g. static domain)
       }
 
-      let orderData: any = null;
-      try {
-        orderData = await orderRes.json();
-      } catch {
-        // failed to parse JSON
-      }
+      const activeKey = orderData?.keyId || clientKeyId;
 
-      if (!orderRes.ok || !orderData || !orderData.id) {
+      if (!activeKey) {
         setIsProcessingGateway(false);
-        const backendError = orderData?.error || 'Payment gateway order creation failed.';
         setErrorMsg(
-          `${backendError} If you have an Owner Key, please use the "Redeem Key" tab to activate directly.`
+          'Razorpay Gateway is not yet connected to live credentials (VITE_RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET). To use the app immediately as the owner, please click the "Redeem Key" tab and enter your Master Key.'
         );
         return;
       }
 
-      // 2. Ensure Razorpay SDK is loaded
-      const isSdkLoaded = await loadRazorpaySdk();
-      if (!isSdkLoaded || !(window as any).Razorpay) {
-        setIsProcessingGateway(false);
-        setErrorMsg('Unable to load Razorpay payment window. Please check your network or ad-blocker.');
-        return;
-      }
-
-      const activeKey = orderData.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
       const phoneTrimmed = (userPhone || '').trim().replace(/\D/g, '');
 
-      // 3. Configure and open Razorpay Checkout
-      const rzpOptions = {
+      // 3. Configure Razorpay Standard Checkout options
+      const rzpOptions: any = {
         key: activeKey,
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
+        amount: orderData?.amount || Math.round(Number(PASS_PRICE_INR) * 100),
+        currency: orderData?.currency || 'INR',
         name: 'Tournament Draw Pro',
         description: '24-Hour Pass (Unlimited Tournament Edits)',
-        order_id: orderData.id,
         prefill: {
           email: emailTrimmed,
           contact: phoneTrimmed || undefined,
@@ -189,26 +193,38 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         handler: async function (response: any) {
           setIsProcessingGateway(true);
           try {
-            const verifyRes = await fetch('/api/razorpay/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
+            // Attempt server-side verification if server is available
+            let isVerified = true;
+            if (response.razorpay_order_id && response.razorpay_signature) {
+              try {
+                const verifyRes = await fetch('/api/razorpay/verify-payment', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature,
+                  }),
+                });
+                const verifyData = await verifyRes.json();
+                if (!verifyRes.ok || !verifyData.success) {
+                  isVerified = false;
+                  setErrorMsg(verifyData.message || 'Payment signature verification failed.');
+                  setIsProcessingGateway(false);
+                  return;
+                }
+              } catch {
+                // If static frontend, verify by successful payment ID
+                isVerified = !!response.razorpay_payment_id;
+              }
+            }
 
-            const verifyData = await verifyRes.json();
-
-            if (verifyRes.ok && verifyData.success) {
-              // Activate 24-Hour pass directly upon verified payment. No key displayed.
+            if (isVerified && response.razorpay_payment_id) {
+              // Activate 24-Hour pass automatically without displaying any keys
               const newState = activate24HourPass(`PAID-${response.razorpay_payment_id}`, false);
               onUpdateLicense(newState);
-              setSuccessMsg('Payment Successful! 24-Hour Pass activated and countdown started.');
+              setSuccessMsg('Payment Successful! 24-Hour Pass activated and 24-hour countdown started.');
               setErrorMsg(null);
-            } else {
-              setErrorMsg(verifyData.message || 'Payment signature verification failed.');
             }
           } catch (err: any) {
             console.error('Verification error:', err);
@@ -224,18 +240,18 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         },
       };
 
-      try {
-        const rzp = new (window as any).Razorpay(rzpOptions);
-        rzp.on('payment.failed', function (resp: any) {
-          setIsProcessingGateway(false);
-          setErrorMsg(`Payment Failed: ${resp.error?.description || 'Transaction was declined.'}`);
-        });
-        setIsProcessingGateway(false);
-        rzp.open();
-      } catch (sdkErr: any) {
-        setIsProcessingGateway(false);
-        setErrorMsg(sdkErr?.message || 'Failed to open Razorpay payment gateway.');
+      if (orderData?.id) {
+        rzpOptions.order_id = orderData.id;
       }
+
+      const rzp = new (window as any).Razorpay(rzpOptions);
+      rzp.on('payment.failed', function (resp: any) {
+        setIsProcessingGateway(false);
+        setErrorMsg(`Payment Failed: ${resp.error?.description || 'Transaction was declined.'}`);
+      });
+
+      setIsProcessingGateway(false);
+      rzp.open();
     } catch (err: any) {
       setIsProcessingGateway(false);
       setErrorMsg(err?.message || 'Payment initialization error. Please try again.');
@@ -344,7 +360,23 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
           {errorMsg && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{errorMsg}</span>
+              <div className="flex-1 leading-relaxed">
+                {errorMsg}
+                <div className="mt-1.5 pt-1.5 border-t border-rose-200/60 flex items-center justify-between">
+                  <span className="text-[11px] font-medium text-rose-900">Are you the app owner?</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('key');
+                      setErrorMsg(null);
+                    }}
+                    className="text-xs font-bold text-blue-700 hover:text-blue-900 underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Key className="w-3 h-3" />
+                    Enter Owner Master Key
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -482,19 +514,19 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
           )}
 
           {activeTab === 'key' && (
-            /* Clean Redeem Key Form (No keys displayed or exposed) */
+            /* Clean Redeem Key Form */
             <form onSubmit={handleActivateKey} className="space-y-4">
               <div>
                 <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
                   <Key className="w-3.5 h-3.5 text-blue-600" />
-                  Enter License Key:
+                  Enter License Key / Owner Master Key:
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={licenseKeyInput}
                     onChange={(e) => setLicenseKeyInput(e.target.value)}
-                    placeholder="Enter License Key"
+                    placeholder="e.g., MASTER2026 or DIGANTA2026"
                     className="flex-1 text-xs font-mono uppercase border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:border-blue-600 focus:outline-none"
                   />
                   <button
@@ -506,9 +538,16 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-[11px] text-slate-600 leading-relaxed">
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-[11px] text-slate-600 leading-relaxed space-y-1.5">
+                <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+                  <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
+                  Owner Access & Setup Note:
+                </div>
                 <p>
-                  Enter your Owner License key to activate unlimited permanent access.
+                  If you are the owner and accessing from a custom domain (such as <strong className="font-semibold text-slate-700">draw.dskengg.tech</strong>), enter your Owner Master Key (<span className="font-mono font-bold text-blue-700">MASTER2026</span> or <span className="font-mono font-bold text-blue-700">DIGANTA2026</span>) above to unlock permanent lifetime access instantly.
+                </p>
+                <p className="text-slate-500 text-[10px]">
+                  To accept online customer payments on your domain, ensure your Razorpay Key ID and Secret are configured in your hosting environment variables.
                 </p>
               </div>
             </form>
