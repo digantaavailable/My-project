@@ -105,6 +105,17 @@ export function saveLicenseState(state: LicenseState): void {
   }
 }
 
+// Reset or remove active pass
+export function resetLicenseState(): LicenseState {
+  const resetState: LicenseState = {
+    trialEditsUsed: 0,
+    maxTrialEdits: MAX_TRIAL_EDITS,
+    activePass: null,
+  };
+  saveLicenseState(resetState);
+  return resetState;
+}
+
 // Record an edit attempt
 export function recordTrialEdit(): LicenseState {
   const current = getLicenseState();

@@ -3,6 +3,7 @@ import {
   LicenseState,
   validateAndActivateKey,
   activate24HourPass,
+  resetLicenseState,
   formatRemainingTime,
 } from '../utils/license';
 import {
@@ -18,6 +19,7 @@ import {
   Shield,
   Loader2,
   ArrowRight,
+  RotateCcw,
 } from 'lucide-react';
 
 interface LicenseModalProps {
@@ -35,7 +37,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 }) => {
   const PASS_PRICE_INR = '300'; // ₹300 per 24-Hour Day Pass
 
-  // Only two tabs: Payment Gateway (24-Hour Pass) & Redeem Key
+  // Tabs: Payment Gateway (24-Hour Pass) & Redeem Key
   const [activeTab, setActiveTab] = useState<'gateway' | 'key'>('gateway');
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -68,6 +70,14 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   );
   const trialEditsLeft = Math.max(0, licenseState.maxTrialEdits - licenseState.trialEditsUsed);
 
+  // Manual reset of license to clear un-paid / simulated pass
+  const handleResetLicense = () => {
+    const freshState = resetLicenseState();
+    onUpdateLicense(freshState);
+    setErrorMsg(null);
+    setSuccessMsg('Pass has been reset. You are now in Free Trial mode.');
+  };
+
   const handleActivateKey = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -83,11 +93,17 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     }
   };
 
-  // Helper to ensure Razorpay SDK is loaded
+  // Helper to safely load Razorpay SDK
   const loadRazorpaySdk = (): Promise<boolean> => {
     return new Promise((resolve) => {
-      if ((window as any).Razorpay) {
+      if (typeof window !== 'undefined' && (window as any).Razorpay) {
         resolve(true);
+        return;
+      }
+      const existingScript = document.querySelector('script[src*="razorpay.com"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve(true));
+        existingScript.addEventListener('error', () => resolve(false));
         return;
       }
       const script = document.createElement('script');
@@ -106,59 +122,64 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
     const emailTrimmed = (userEmail || '').trim().toLowerCase();
     if (!emailTrimmed || !emailTrimmed.includes('@') || !emailTrimmed.includes('.')) {
-      setErrorMsg('Please enter a valid email address (e.g., yourname@gmail.com) for payment verification.');
+      setErrorMsg('Please enter a valid email address (e.g., yourname@gmail.com) for your receipt.');
       return;
     }
 
     setIsProcessingGateway(true);
 
     try {
-      // 1. Ensure Razorpay checkout script is loaded
-      const isSdkLoaded = await loadRazorpaySdk();
-      if (!isSdkLoaded) {
+      // 1. Call backend to create Razorpay Order
+      let orderRes: Response;
+      try {
+        orderRes = await fetch('/api/razorpay/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: Number(PASS_PRICE_INR),
+            email: emailTrimmed,
+          }),
+        });
+      } catch {
         setIsProcessingGateway(false);
-        setErrorMsg('Unable to load Payment Gateway SDK. Please check your internet connection and try again.');
+        setErrorMsg('Unable to connect to the backend server. Please check your network connection.');
         return;
       }
 
-      // 2. Call backend to create Razorpay Order
-      const res = await fetch('/api/razorpay/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount: Number(PASS_PRICE_INR),
-          email: emailTrimmed,
-        }),
-      });
+      let orderData: any = null;
+      try {
+        orderData = await orderRes.json();
+      } catch {
+        // failed to parse JSON
+      }
 
-      const orderData = await res.json();
-
-      if (!res.ok || !orderData.id) {
+      if (!orderRes.ok || !orderData || !orderData.id) {
         setIsProcessingGateway(false);
+        const backendError = orderData?.error || 'Payment gateway order creation failed.';
         setErrorMsg(
-          orderData.error ||
-            'Payment Gateway is not configured with active API credentials (VITE_RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET). Please configure Razorpay keys in settings or enter an Owner Key.'
+          `${backendError} If you have an Owner Key, please use the "Redeem Key" tab to activate directly.`
         );
         return;
       }
 
-      const activeKey = orderData.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
-
-      if (!activeKey) {
+      // 2. Ensure Razorpay SDK is loaded
+      const isSdkLoaded = await loadRazorpaySdk();
+      if (!isSdkLoaded || !(window as any).Razorpay) {
         setIsProcessingGateway(false);
-        setErrorMsg('Payment Key ID is missing. Please ensure VITE_RAZORPAY_KEY_ID is configured.');
+        setErrorMsg('Unable to load Razorpay payment window. Please check your network or ad-blocker.');
         return;
       }
 
+      const activeKey = orderData.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID;
       const phoneTrimmed = (userPhone || '').trim().replace(/\D/g, '');
 
-      // 3. Open Real Razorpay Standard Checkout
+      // 3. Configure and open Razorpay Checkout
       const rzpOptions = {
         key: activeKey,
         amount: orderData.amount,
         currency: orderData.currency || 'INR',
         name: 'Tournament Draw Pro',
-        description: '24-Hour Pass (Unlimited Edits & Creation)',
+        description: '24-Hour Pass (Unlimited Tournament Edits)',
         order_id: orderData.id,
         prefill: {
           email: emailTrimmed,
@@ -181,17 +202,17 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             const verifyData = await verifyRes.json();
 
             if (verifyRes.ok && verifyData.success) {
-              // Automatically activate 24-Hour Pass without displaying or generating any key
+              // Activate 24-Hour pass directly upon verified payment. No key displayed.
               const newState = activate24HourPass(`PAID-${response.razorpay_payment_id}`, false);
               onUpdateLicense(newState);
-              setSuccessMsg('Payment Successful! Your 24-Hour Pass is active and your 24-hour countdown has started.');
+              setSuccessMsg('Payment Successful! 24-Hour Pass activated and countdown started.');
               setErrorMsg(null);
             } else {
               setErrorMsg(verifyData.message || 'Payment signature verification failed.');
             }
           } catch (err: any) {
-            console.error('Payment Verification error:', err);
-            setErrorMsg('Network error while verifying payment. If amount was deducted, please contact support.');
+            console.error('Verification error:', err);
+            setErrorMsg('Network error while verifying payment.');
           } finally {
             setIsProcessingGateway(false);
           }
@@ -203,17 +224,21 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         },
       };
 
-      const rzp = new (window as any).Razorpay(rzpOptions);
-      rzp.on('payment.failed', function (resp: any) {
+      try {
+        const rzp = new (window as any).Razorpay(rzpOptions);
+        rzp.on('payment.failed', function (resp: any) {
+          setIsProcessingGateway(false);
+          setErrorMsg(`Payment Failed: ${resp.error?.description || 'Transaction was declined.'}`);
+        });
         setIsProcessingGateway(false);
-        setErrorMsg(`Payment Failed: ${resp.error?.description || 'Transaction was declined or cancelled.'}`);
-      });
-
-      setIsProcessingGateway(false);
-      rzp.open();
+        rzp.open();
+      } catch (sdkErr: any) {
+        setIsProcessingGateway(false);
+        setErrorMsg(sdkErr?.message || 'Failed to open Razorpay payment gateway.');
+      }
     } catch (err: any) {
       setIsProcessingGateway(false);
-      setErrorMsg(err?.message || 'Failed to initiate payment gateway. Please try again.');
+      setErrorMsg(err?.message || 'Payment initialization error. Please try again.');
     }
   };
 
@@ -258,12 +283,23 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     UNLIMITED ACCESS
                   </span>
                 </div>
-                <p className="text-xs text-emerald-800 mt-1">
-                  Remaining Time:{' '}
-                  <strong className="font-mono text-emerald-950 font-bold">
-                    {formatRemainingTime(licenseState.activePass.expiresAt)}
-                  </strong>
-                </p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-xs text-emerald-800">
+                    Remaining Time:{' '}
+                    <strong className="font-mono text-emerald-950 font-bold">
+                      {formatRemainingTime(licenseState.activePass.expiresAt)}
+                    </strong>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleResetLicense}
+                    className="text-[11px] text-emerald-700 hover:text-rose-700 font-semibold flex items-center gap-1 cursor-pointer transition underline decoration-emerald-300"
+                    title="Reset back to Free Trial"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Reset Pass
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -297,7 +333,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 </div>
                 <p className="text-xs mt-1 leading-relaxed">
                   {trialEditsLeft > 0
-                    ? `You are in free trial mode (${trialEditsLeft} edits left). Get a 24-Hour Pass for unlimited updates.`
+                    ? `You are in free trial mode (${trialEditsLeft} edits left). Get a 24-Hour Pass to start 24 hours of unlimited updates.`
                     : 'Your 5 trial edits are complete. Get a 24-Hour Pass to unlock unlimited tournament draw edits.'}
                 </p>
               </div>
@@ -472,7 +508,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
               <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-[11px] text-slate-600 leading-relaxed">
                 <p>
-                  Enter your Owner License key or license key to activate unlimited access.
+                  Enter your Owner License key to activate unlimited permanent access.
                 </p>
               </div>
             </form>
