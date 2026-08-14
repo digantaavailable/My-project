@@ -138,7 +138,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (!userEmail.trim() || !userEmail.includes('@')) {
+    const emailTrimmed = userEmail.trim();
+    if (!emailTrimmed || !emailTrimmed.includes('@') || !emailTrimmed.includes('.')) {
       setErrorMsg('Please enter a valid email address to receive your payment receipt & 24-Hour key.');
       return;
     }
@@ -151,6 +152,9 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     setIsProcessingGateway(true);
     setErrorMsg(null);
 
+    const emailTrimmed = userEmail.trim();
+    const phoneTrimmed = userPhone.trim().replace(/\D/g, '');
+
     try {
       // 1. Create order via backend Express API
       const orderRes = await fetch('/api/razorpay/create-order', {
@@ -158,7 +162,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount: Number(PASS_PRICE_INR),
-          email: userEmail,
+          email: emailTrimmed,
         }),
       });
 
@@ -180,8 +184,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
           description: '24-Hour Unlimited Pass',
           order_id: order.id,
           prefill: {
-            email: userEmail,
-            contact: userPhone || '',
+            email: emailTrimmed,
+            contact: phoneTrimmed || undefined,
           },
           theme: {
             color: '#2563eb',
@@ -190,33 +194,39 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             setIsProcessingGateway(true);
             setGatewayStep('processing');
 
-            // 3. Verify Razorpay signature on backend
-            const verifyRes = await fetch('/api/razorpay/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                userEmail,
-              }),
-            });
+            try {
+              // 3. Verify Razorpay signature on backend
+              const verifyRes = await fetch('/api/razorpay/verify-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  userEmail: emailTrimmed,
+                }),
+              });
 
-            const verifyData = await verifyRes.json();
+              const verifyData = await verifyRes.json();
 
-            if (verifyData.success && verifyData.key) {
-              const newState = activate24HourPass(verifyData.key, false);
-              setIsProcessingGateway(false);
-              setGatewayStep('success');
-              setIssuedKey(verifyData.key);
-              setSuccessMsg(
-                `Payment of ₹${PASS_PRICE_INR} verified via Razorpay! Your 24-Hour Pass Key (${verifyData.key}) has been activated.`
-              );
-              onUpdateLicense(newState);
-            } else {
+              if (verifyData.success && verifyData.key) {
+                const newState = activate24HourPass(verifyData.key, false);
+                setIsProcessingGateway(false);
+                setGatewayStep('success');
+                setIssuedKey(verifyData.key);
+                setSuccessMsg(
+                  `Payment of ₹${PASS_PRICE_INR} verified via Razorpay! Your 24-Hour Pass Key (${verifyData.key}) has been activated.`
+                );
+                onUpdateLicense(newState);
+              } else {
+                setIsProcessingGateway(false);
+                setGatewayStep('idle');
+                setErrorMsg(verifyData.message || 'Payment signature verification failed.');
+              }
+            } catch (verErr: any) {
               setIsProcessingGateway(false);
               setGatewayStep('idle');
-              setErrorMsg(verifyData.message || 'Payment signature verification failed.');
+              setErrorMsg(verErr.message || 'Error communicating with verification server.');
             }
           },
           modal: {
@@ -232,33 +242,44 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
       } else {
         // Simulation mode (if keys aren't set in environment yet)
         setTimeout(async () => {
-          const verifyRes = await fetch('/api/razorpay/verify-payment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              isSimulation: true,
-              userEmail,
-            }),
-          });
-          const verifyData = await verifyRes.json();
+          try {
+            const verifyRes = await fetch('/api/razorpay/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                isSimulation: true,
+                userEmail: emailTrimmed,
+              }),
+            });
+            const verifyData = await verifyRes.json();
 
-          const generatedKey = verifyData.key || generateRandom24HourKey();
-          const newState = activate24HourPass(generatedKey, false);
+            const generatedKey = verifyData.key || generateRandom24HourKey();
+            const newState = activate24HourPass(generatedKey, false);
 
-          setIsProcessingGateway(false);
-          setGatewayStep('success');
-          setIssuedKey(generatedKey);
-          setSuccessMsg(
-            `Payment of ₹${PASS_PRICE_INR} verified! Your 24-Hour Pass Key (${generatedKey}) has been activated and registered.`
-          );
-          onUpdateLicense(newState);
+            setIsProcessingGateway(false);
+            setGatewayStep('success');
+            setIssuedKey(generatedKey);
+            setSuccessMsg(
+              `Payment of ₹${PASS_PRICE_INR} verified! Your 24-Hour Pass Key (${generatedKey}) has been activated and registered.`
+            );
+            onUpdateLicense(newState);
+          } catch (simErr: any) {
+            setIsProcessingGateway(false);
+            setGatewayStep('idle');
+            setErrorMsg(simErr.message || 'Verification simulation failed.');
+          }
         }, 1500);
       }
     } catch (err: any) {
       console.error('Payment Error:', err);
       setIsProcessingGateway(false);
       setGatewayStep('idle');
-      setErrorMsg(err.message || 'Payment processing encountered an error.');
+      const errText = err?.message || String(err);
+      if (errText.includes('pattern') || errText.includes('match')) {
+        setErrorMsg('Please ensure your email address is formatted correctly (e.g., name@example.com).');
+      } else {
+        setErrorMsg(errText || 'Payment processing encountered an error.');
+      }
     }
   };
 
@@ -434,7 +455,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
           {activeTab === 'gateway' && (
             /* Integrated Payment Gateway Section */
-            <form onSubmit={handleStartGatewayCheckout} className="space-y-4">
+            <form onSubmit={handleStartGatewayCheckout} noValidate className="space-y-4">
               <div className="bg-gradient-to-r from-blue-900 to-slate-900 text-white rounded-xl p-4 shadow-xs">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] uppercase tracking-wider text-blue-300 font-bold flex items-center gap-1">
@@ -533,8 +554,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     Your Email Address (For Instant Key Delivery & Receipt)
                   </label>
                   <input
-                    type="email"
-                    required
+                    type="text"
+                    inputMode="email"
                     value={userEmail}
                     onChange={(e) => setUserEmail(e.target.value)}
                     placeholder="e.g., player@gmail.com"
@@ -547,7 +568,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                     Mobile Number (Optional - for SMS Receipt)
                   </label>
                   <input
-                    type="tel"
+                    type="text"
+                    inputMode="numeric"
                     value={userPhone}
                     onChange={(e) => setUserPhone(e.target.value)}
                     placeholder="e.g., 9876543210"
