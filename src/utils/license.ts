@@ -1,3 +1,8 @@
+import {
+  recordLocalActivity,
+  checkAndRedeemLocalTrialCode,
+} from './adminStore';
+
 export interface ActivePass {
   isActive: boolean;
   activatedAt: number;
@@ -32,12 +37,15 @@ export function isDeveloperMasterKey(key: string): boolean {
   return DEVELOPER_MASTER_KEYS.includes(clean) || clean.startsWith('MASTER-') || clean.startsWith('DEV-');
 }
 
-// Helper to log user and system activity to server
+// Helper to log user and system activity to server & local storage
 export async function logActivity(
   type: string,
   title: string,
   details?: string
 ): Promise<void> {
+  // Always log locally so static deployments (GitHub / Vercel) have real-time activity feeds
+  recordLocalActivity(type as any, title, details);
+
   try {
     await fetch('/api/activity/log', {
       method: 'POST',
@@ -45,7 +53,7 @@ export async function logActivity(
       body: JSON.stringify({ type, title, details }),
     });
   } catch {
-    // offline or static fallback
+    // offline or static fallback handled by recordLocalActivity
   }
 }
 
@@ -291,6 +299,17 @@ export async function validateAndActivateKeyAsync(
     // Backend fetch fallback
   }
 
+  // Check local admin store trial codes (e.g. TRIAL24-XXXX or admin-generated codes)
+  const localRedemption = checkAndRedeemLocalTrialCode(cleaned);
+  if (localRedemption.success) {
+    const updated = activate24HourPass(cleaned, false, localRedemption.expiresAt);
+    return {
+      success: true,
+      message: localRedemption.message,
+      state: updated,
+    };
+  }
+
   // Check issued payment keys
   const issuedKeys = getIssuedKeys();
   const isIssuedKey = issuedKeys.includes(cleaned);
@@ -307,7 +326,9 @@ export async function validateAndActivateKeyAsync(
 
   return {
     success: false,
-    message: 'Invalid pass code. Please check your code or complete payment for a 24-Hour Pass.',
+    message: localRedemption.message !== 'Code not found.' 
+      ? localRedemption.message 
+      : 'Invalid pass code. Please check your code or complete payment for a 24-Hour Pass.',
   };
 }
 
@@ -335,6 +356,16 @@ export function validateAndActivateKey(key: string): { success: boolean; message
     };
   }
 
+  const localRedemption = checkAndRedeemLocalTrialCode(cleaned);
+  if (localRedemption.success) {
+    const updated = activate24HourPass(cleaned, false, localRedemption.expiresAt);
+    return {
+      success: true,
+      message: localRedemption.message,
+      state: updated,
+    };
+  }
+
   const issuedKeys = getIssuedKeys();
   if (issuedKeys.includes(cleaned) || /^PASS-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(cleaned)) {
     const updated = activate24HourPass(cleaned, false);
@@ -347,7 +378,7 @@ export function validateAndActivateKey(key: string): { success: boolean; message
 
   return {
     success: false,
-    message: 'Invalid pass code.',
+    message: localRedemption.message !== 'Code not found.' ? localRedemption.message : 'Invalid pass code.',
   };
 }
 

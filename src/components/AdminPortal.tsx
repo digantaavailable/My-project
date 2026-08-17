@@ -23,6 +23,13 @@ import {
 } from 'lucide-react';
 import { AdminDashboardData, TrialCodeRecord } from '../types';
 import { formatRemainingTime, LicenseState, isDeveloperMasterKey } from '../utils/license';
+import {
+  getLocalAdminData,
+  saveLocalAdminData,
+  generateLocalTrialCode,
+  revokeLocalTrialCode,
+  clearLocalActivities,
+} from '../utils/adminStore';
 
 interface AdminPortalProps {
   isOpen: boolean;
@@ -41,8 +48,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onActivateDeveloperPass,
   onResetToTrial,
 }) => {
-  const [data, setData] = useState<AdminDashboardData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [data, setData] = useState<AdminDashboardData>(() => getLocalAdminData());
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'codes' | 'activity' | 'payments'>('overview');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -62,16 +69,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (!isMaster) return;
     setLoading(true);
     setError(null);
+
+    // 1. Immediately load local store
+    const local = getLocalAdminData();
+    setData(local);
+
+    // 2. Try fetching from server if backend is active
     try {
       const res = await fetch('/api/admin/data');
-      if (!res.ok) {
-        throw new Error('Failed to load admin dashboard data');
+      if (res.ok) {
+        const jsonData = await res.json();
+        if (jsonData && jsonData.metrics) {
+          setData(jsonData);
+          saveLocalAdminData(jsonData);
+        }
       }
-      const jsonData = await res.json();
-      setData(jsonData);
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || 'Failed to fetch dashboard data');
+    } catch {
+      // Running in static deployment (e.g. GitHub / Vercel / draw.dskengg.tech)
+      // Perfectly fine - local admin store is already loaded and active!
     } finally {
       setLoading(false);
     }
@@ -99,6 +114,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       const success = onAuthenticateMaster(clean);
       if (success) {
         setAuthKeyInput('');
+        fetchDashboardData();
       } else {
         setAuthError('Authentication failed. Please verify the key.');
       }
@@ -115,44 +131,50 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   const handleGenerateCode = async (e: React.FormEvent) => {
     e.preventDefault();
+    // 1. Generate in local store immediately
+    const newRecord = generateLocalTrialCode(newCodeHours, newCodeNotes);
+    setIsGeneratingCode(false);
+    setNewCodeNotes('');
+    setData(getLocalAdminData());
+
+    // 2. Sync to server if backend is active
     try {
-      const res = await fetch('/api/admin/generate-trial-key', {
+      await fetch('/api/admin/generate-trial-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hours: newCodeHours, notes: newCodeNotes || 'Created via Admin Dashboard' }),
       });
-      if (res.ok) {
-        setIsGeneratingCode(false);
-        setNewCodeNotes('');
-        fetchDashboardData();
-      }
-    } catch (err) {
-      console.error('Failed to generate trial code', err);
+    } catch {
+      // Ignored for static hosting
     }
   };
 
   const handleRevokeCode = async (code: string) => {
     if (window.confirm(`Revoke and deactivate pass code "${code}"?`)) {
+      revokeLocalTrialCode(code);
+      setData(getLocalAdminData());
+
       try {
         await fetch('/api/admin/revoke-key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code }),
         });
-        fetchDashboardData();
-      } catch (err) {
-        console.error('Failed to revoke code', err);
+      } catch {
+        // Ignored for static hosting
       }
     }
   };
 
   const handleClearLogs = async () => {
     if (window.confirm('Clear recent activity logs?')) {
+      clearLocalActivities();
+      setData(getLocalAdminData());
+
       try {
         await fetch('/api/admin/clear-logs', { method: 'POST' });
-        fetchDashboardData();
-      } catch (err) {
-        console.error('Failed to clear logs', err);
+      } catch {
+        // Ignored for static hosting
       }
     }
   };
