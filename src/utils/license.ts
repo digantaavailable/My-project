@@ -3,6 +3,7 @@ export interface ActivePass {
   activatedAt: number;
   expiresAt: number;
   licenseKey?: string;
+  isMasterKey?: boolean;
 }
 
 export interface LicenseState {
@@ -13,18 +14,67 @@ export interface LicenseState {
 
 const LICENSE_STORAGE_KEY = 'tournament_draw_license_v1';
 const ISSUED_KEYS_STORAGE_KEY = 'tournament_draw_issued_keys_v1';
+const BURNED_KEYS_STORAGE_KEY = 'tournament_draw_burned_keys_v1';
 export const MAX_TRIAL_EDITS = 5;
 
-// Official Owner Lifetime License Keys (Only for the Owner of the application)
-export const OWNER_LIFETIME_KEYS = [
+// Single Master Developer Key (reusable forever as general user, reset goes back to trial mode, reusable again whenever needed)
+export const DEVELOPER_MASTER_KEY = 'MASTER2026';
+export const DEVELOPER_MASTER_KEYS = [
   'MASTER2026',
   'DIGANTA2026',
-  'OWNER-LIFETIME-MASTER',
-  'LIFE-OWNER-2026',
-  'OWNER2026',
+  'ADMIN2026',
+  'DEV2026',
 ];
 
-export const MASTER_LICENSE_KEY = 'MASTER2026';
+// Helper to check if key is master developer key
+export function isDeveloperMasterKey(key: string): boolean {
+  const clean = (key || '').trim().toUpperCase();
+  return DEVELOPER_MASTER_KEYS.includes(clean) || clean.startsWith('MASTER-') || clean.startsWith('DEV-');
+}
+
+// Helper to log user and system activity to server
+export async function logActivity(
+  type: string,
+  title: string,
+  details?: string
+): Promise<void> {
+  try {
+    await fetch('/api/activity/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, title, details }),
+    });
+  } catch {
+    // offline or static fallback
+  }
+}
+
+// Helper to get burned/used payment keys
+function getBurnedKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(BURNED_KEYS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordBurnedKey(key: string): void {
+  try {
+    const clean = key.trim().toUpperCase();
+    // Developer master key is NEVER burned so developer can use it again anytime
+    if (isDeveloperMasterKey(clean)) {
+      return;
+    }
+    const keys = getBurnedKeys();
+    if (!keys.includes(clean)) {
+      keys.push(clean);
+      localStorage.setItem(BURNED_KEYS_STORAGE_KEY, JSON.stringify(keys));
+    }
+  } catch (e) {
+    console.warn('Failed to record burned key', e);
+  }
+}
 
 // Helper to get stored issued payment keys
 function getIssuedKeys(): string[] {
@@ -51,7 +101,7 @@ export function recordIssuedKey(key: string): void {
 
 // Generate a random 24-Hour License Key upon payment
 export function generateRandom24HourKey(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Readable alphanumeric
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const randSegment = (len: number) =>
     Array.from({ length: len }, () => chars.charAt(Math.floor(Math.random() * chars.length))).join('');
   const key = `PASS-${randSegment(4)}-${randSegment(4)}`;
@@ -70,7 +120,9 @@ export function getLicenseState(): LicenseState {
       // Check if pass is expired
       if (activePass && activePass.expiresAt) {
         if (Date.now() > activePass.expiresAt) {
-          // Pass expired
+          if (activePass.licenseKey && !isDeveloperMasterKey(activePass.licenseKey)) {
+            recordBurnedKey(activePass.licenseKey);
+          }
           return {
             trialEditsUsed: parsed.trialEditsUsed ?? 0,
             maxTrialEdits: MAX_TRIAL_EDITS,
@@ -105,8 +157,28 @@ export function saveLicenseState(state: LicenseState): void {
   }
 }
 
-// Reset or remove active pass
+// Reset pass -> automatically returns application to trial mode
 export function resetLicenseState(): LicenseState {
+  const current = getLicenseState();
+  if (current.activePass?.licenseKey) {
+    const key = current.activePass.licenseKey;
+    // Only burn non-developer keys
+    if (!isDeveloperMasterKey(key)) {
+      recordBurnedKey(key);
+    }
+    fetch('/api/license/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeKey: key }),
+    }).catch(() => {});
+  } else {
+    fetch('/api/license/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).catch(() => {});
+  }
+
   const resetState: LicenseState = {
     trialEditsUsed: 0,
     maxTrialEdits: MAX_TRIAL_EDITS,
@@ -120,7 +192,7 @@ export function resetLicenseState(): LicenseState {
 export function recordTrialEdit(): LicenseState {
   const current = getLicenseState();
   if (current.activePass && Date.now() < current.activePass.expiresAt) {
-    return current; // Active pass has unlimited edits
+    return current;
   }
 
   const updated: LicenseState = {
@@ -131,18 +203,24 @@ export function recordTrialEdit(): LicenseState {
   return updated;
 }
 
-// Activate a Pass (24-Hour or Lifetime Master Pass)
-export function activate24HourPass(licenseKey: string, isLifetime: boolean = false): LicenseState {
+// Activate a Pass (24-Hour or Master Developer Pass)
+export function activate24HourPass(
+  licenseKey: string,
+  isLifetime: boolean = false,
+  customExpiresAt?: number
+): LicenseState {
   const now = Date.now();
-  // Lifetime master pass = 100 years, 24-Hour pass = 24 hours
-  const durationMs = isLifetime ? 100 * 365 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-  const expiresAt = now + durationMs;
+  const isMaster = isDeveloperMasterKey(licenseKey) || isLifetime;
+  // Master Developer pass gives permanent active pass until developer clicks reset to go to trial mode
+  const durationMs = isMaster ? 100 * 365 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const expiresAt = customExpiresAt || now + durationMs;
 
   const newPass: ActivePass = {
     isActive: true,
     activatedAt: now,
     expiresAt,
     licenseKey,
+    isMasterKey: isMaster,
   };
 
   const current = getLicenseState();
@@ -155,45 +233,125 @@ export function activate24HourPass(licenseKey: string, isLifetime: boolean = fal
   return updated;
 }
 
-// Validate custom license keys (accepts Owner Lifetime Keys or payment-issued random 24-hour keys)
-export function validateAndActivateKey(key: string): { success: boolean; message: string; state?: LicenseState } {
+// Convenient helper to activate master developer key
+export function activateMasterDeveloperPass(key: string = DEVELOPER_MASTER_KEY): LicenseState {
+  return activate24HourPass(key, true);
+}
+
+// Validate & activate key (Master key can be used repeatedly even after reset)
+export async function validateAndActivateKeyAsync(
+  key: string
+): Promise<{ success: boolean; message: string; state?: LicenseState }> {
   const cleaned = key.trim().toUpperCase();
   if (!cleaned) {
-    return { success: false, message: 'Please enter a valid license key.' };
+    return { success: false, message: 'Please enter a valid pass code or key.' };
   }
 
-  // 1. Owner Lifetime License Key Check (Only for application owner)
-  if (OWNER_LIFETIME_KEYS.includes(cleaned) || cleaned.startsWith('OWNER-LIFE-')) {
+  // Developer Master Key check (always works, reusable whenever needed)
+  if (isDeveloperMasterKey(cleaned)) {
     const updated = activate24HourPass(cleaned, true);
     return {
       success: true,
-      message: 'Owner Lifetime License Key Activated! Permanent Unlimited Access is active.',
+      message: 'Master Key activated successfully! Full access granted.',
       state: updated,
     };
   }
 
-  // 2. Validate Payment-Issued 24-Hour Key
+  const burnedKeys = getBurnedKeys();
+  if (burnedKeys.includes(cleaned)) {
+    return {
+      success: false,
+      message: 'This pass key has already been redeemed and has expired.',
+    };
+  }
+
+  // Server redemption endpoint
+  try {
+    const res = await fetch('/api/license/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: cleaned }),
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const updated = activate24HourPass(cleaned, data.isLifetime, data.expiresAt);
+      return {
+        success: true,
+        message: data.message || 'Pass activated successfully!',
+        state: updated,
+      };
+    } else if (!res.ok && data.message) {
+      return {
+        success: false,
+        message: data.message,
+      };
+    }
+  } catch {
+    // Backend fetch fallback
+  }
+
+  // Check issued payment keys
   const issuedKeys = getIssuedKeys();
   const isIssuedKey = issuedKeys.includes(cleaned);
-  // Also recognize valid format PASS-XXXX-XXXX if generated in session
   const isValidFormatPassKey = /^PASS-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(cleaned);
 
   if (isIssuedKey || isValidFormatPassKey) {
     const updated = activate24HourPass(cleaned, false);
     return {
       success: true,
-      message: '24-Hour Pass activated successfully! Valid for 24 hours from activation.',
+      message: '24-Hour Pass activated successfully! Valid for 24 hours.',
       state: updated,
     };
   }
 
   return {
     success: false,
-    message: 'Invalid license key. Please check your key or complete payment for a 24-Hour Pass.',
+    message: 'Invalid pass code. Please check your code or complete payment for a 24-Hour Pass.',
   };
 }
 
-// Helper to format remaining time on pass (e.g. "23h 45m 12s" or "Unlimited Access")
+// Synchronous version for fallback
+export function validateAndActivateKey(key: string): { success: boolean; message: string; state?: LicenseState } {
+  const cleaned = key.trim().toUpperCase();
+  if (!cleaned) {
+    return { success: false, message: 'Please enter a valid key.' };
+  }
+
+  if (isDeveloperMasterKey(cleaned)) {
+    const updated = activate24HourPass(cleaned, true);
+    return {
+      success: true,
+      message: 'Master Key activated successfully! Full access granted.',
+      state: updated,
+    };
+  }
+
+  const burnedKeys = getBurnedKeys();
+  if (burnedKeys.includes(cleaned)) {
+    return {
+      success: false,
+      message: 'This pass key has already been redeemed and has expired.',
+    };
+  }
+
+  const issuedKeys = getIssuedKeys();
+  if (issuedKeys.includes(cleaned) || /^PASS-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(cleaned)) {
+    const updated = activate24HourPass(cleaned, false);
+    return {
+      success: true,
+      message: '24-Hour Pass activated successfully!',
+      state: updated,
+    };
+  }
+
+  return {
+    success: false,
+    message: 'Invalid pass code.',
+  };
+}
+
+// Helper to format remaining time on pass
 export function formatRemainingTime(expiresAt: number): string {
   const diff = expiresAt - Date.now();
   if (diff <= 0) return 'Expired';
@@ -202,7 +360,7 @@ export function formatRemainingTime(expiresAt: number): string {
   const hours = Math.floor(totalSeconds / 3600);
 
   if (hours > 8760) {
-    return 'Unlimited Lifetime Access';
+    return 'Master Key Full Access';
   }
 
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -213,4 +371,3 @@ export function formatRemainingTime(expiresAt: number): string {
   }
   return `${minutes}m ${seconds}s`;
 }
-

@@ -40,3 +40,60 @@ export interface TournamentDraw {
   entries: PlayerEntry[];
   config: BracketConfig;
 }
+
+export interface ActivityEvent {
+  id: string;
+  type:
+    | 'draw_created'
+    | 'draw_edited'
+    | 'export_docx'
+    | 'export_pdf'
+    | 'export_png'
+    | 'print_draw'
+    | 'pass_activated'
+    | 'key_redeemed'
+    | 'pass_reset'
+    | 'payment_created'
+    | 'payment_success'
+    | 'payment_failed'
+    | 'admin_action';
+  title: string;
+  details?: string;
+  timestamp: number;
+}
+
+export interface TrialCodeRecord {
+  code: string;
+  durationHours: number;
+  status: 'available' | 'active' | 'used' | 'revoked';
+  createdAt: number;
+  activatedAt?: number;
+  expiresAt?: number;
+  notes?: string;
+}
+
+export interface PaymentLogRecord {
+  id: string;
+  orderId?: string;
+  paymentId?: string;
+  amount: number;
+  currency: string;
+  email?: string;
+  status: 'created' | 'success' | 'failed';
+  timestamp: number;
+}
+
+export interface AdminDashboardData {
+  metrics: {
+    totalDrawsCreated: number;
+    totalExportsDocx: number;
+    totalExportsPdf: number;
+    totalExportsPng: number;
+    activePassesCount: number;
+    totalRevenueInr: number;
+    totalPaymentsCount: number;
+  };
+  trialCodes: TrialCodeRecord[];
+  recentPayments: PaymentLogRecord[];
+  recentActivities: ActivityEvent[];
+}

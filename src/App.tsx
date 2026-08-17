@@ -5,6 +5,7 @@ import { BracketView } from './components/BracketView';
 import { EditPlayerModal } from './components/EditPlayerModal';
 import { ExportToolbar } from './components/ExportToolbar';
 import { LicenseModal } from './components/LicenseModal';
+import { AdminPortal } from './components/AdminPortal';
 import { BracketConfig, PlayerEntry } from './types';
 import {
   INITIAL_RAW_TEXT,
@@ -19,13 +20,34 @@ import {
   getBracketImageBlob,
 } from './utils/pdfExport';
 import { saveAs } from 'file-saver';
-import { getLicenseState, recordTrialEdit, LicenseState } from './utils/license';
+import {
+  getLicenseState,
+  recordTrialEdit,
+  LicenseState,
+  activateMasterDeveloperPass,
+  resetLicenseState,
+  logActivity,
+  isDeveloperMasterKey,
+} from './utils/license';
 
 const STORAGE_KEY = 'tournament_draw_saved_state_v1';
 
 export default function App() {
   const [licenseState, setLicenseState] = useState<LicenseState>(() => getLicenseState());
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState<boolean>(false);
+  const [isAdminPortalOpen, setIsAdminPortalOpen] = useState<boolean>(false);
+
+  // Hidden Keyboard Shortcut (Ctrl+Shift+A or Cmd+Shift+A) to open Admin Portal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setIsAdminPortalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const [rawText, setRawText] = useState<string>(() => {
     try {
@@ -133,6 +155,7 @@ export default function App() {
     }
   };
 
+  // Auto-pad list to next power of 2 with "Bye"
   const handleAutoPadByes = () => {
     const paddedEntries = parseRawTextToEntries(rawText, true);
     const updatedText = paddedEntries.map((e) => e.name).join('\n');
@@ -142,10 +165,7 @@ export default function App() {
   // Swap two players at index1 and index2
   const handleSwapPlayers = (index1: number, index2: number) => {
     const lines = rawText.split('\n');
-    const maxIdx = Math.max(index1, index2);
-    while (lines.length <= maxIdx) {
-      lines.push('Bye');
-    }
+    if (index1 < 0 || index1 >= lines.length || index2 < 0 || index2 >= lines.length) return;
     const temp = lines[index1];
     lines[index1] = lines[index2];
     lines[index2] = temp;
@@ -155,17 +175,17 @@ export default function App() {
   // Move a player up or down by 1 spot
   const handleMovePlayer = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= entries.length) return;
     handleSwapPlayers(index, targetIndex);
   };
 
-  // Click on a slot box in the draw
+  // Open player edit modal
   const handleSelectPlayer = (player: PlayerEntry, index: number) => {
     setSelectedPlayer(player);
     setSelectedPlayerIndex(index);
     setIsEditModalOpen(true);
   };
 
+  // Save changes from EditPlayerModal
   const handleSavePlayer = (index: number, updatedName: string) => {
     const lines = rawText.split('\n');
     while (lines.length <= index) {
@@ -173,23 +193,46 @@ export default function App() {
     }
     lines[index] = updatedName;
     checkTrialAndApplyText(lines.join('\n'));
+    logActivity('draw_edited', 'Player Name Edited', `Slot ${index + 1}: "${updatedName}"`);
+  };
+
+  // Developer Quick Controls
+  const handleAuthenticateMaster = (key: string): boolean => {
+    const clean = (key || '').trim().toUpperCase();
+    if (isDeveloperMasterKey(clean)) {
+      const activated = activateMasterDeveloperPass(clean);
+      setLicenseState(activated);
+      logActivity('key_redeemed', 'Master Developer Authenticated', `Key: ${clean}`);
+      return true;
+    }
+    return false;
+  };
+
+  const handleActivateDeveloperPass = () => {
+    const activated = activateMasterDeveloperPass('MASTER2026');
+    setLicenseState(activated);
+    logActivity('key_redeemed', 'Master Developer Pass Activated', 'Key: MASTER2026');
+  };
+
+  const handleResetToTrial = () => {
+    const reset = resetLicenseState();
+    setLicenseState(reset);
+    logActivity('pass_reset', 'Application Reset to Free Trial', '5 Free Edits Re-enabled');
   };
 
   // Export Handlers
   const handleExportDocx = async () => {
     try {
-      setIsExporting(true);
-      let imgBlob: Blob | undefined = undefined;
+      let imgBlob: Blob | undefined;
       if (bracketRef.current) {
         const blob = await getBracketImageBlob(bracketRef.current);
         if (blob) imgBlob = blob;
       }
       await generateDocxBracket(config.title, entries, config, imgBlob);
+      logActivity('export_docx', 'Word Document (.docx) Exported', `Title: "${config.title || 'Draw'}"`);
     } catch (err) {
       console.error('Word export failed:', err);
       alert('Failed to generate Word document. Please try again.');
-    } finally {
-      setIsExporting(false);
     }
   };
 
@@ -198,10 +241,11 @@ export default function App() {
       setIsExporting(true);
       if (bracketRef.current) {
         await exportToPdf(bracketRef.current, config.title || 'Tournament_Draw');
+        logActivity('export_pdf', 'PDF Document Exported', `Title: "${config.title || 'Draw'}"`);
       }
     } catch (err) {
       console.error('PDF export failed:', err);
-      alert('Failed to generate PDF export.');
+      alert('Failed to generate PDF. Please try again.');
     } finally {
       setIsExporting(false);
     }
@@ -212,19 +256,21 @@ export default function App() {
       setIsExporting(true);
       if (bracketRef.current) {
         await exportToPng(bracketRef.current, `${(config.title || 'Tournament_Draw').replace(/[^a-zA-Z0-9_-]/g, '_')}.png`);
+        logActivity('export_png', 'PNG Image Exported', `Title: "${config.title || 'Draw'}"`);
       }
     } catch (err) {
       console.error('PNG export failed:', err);
-      alert('Failed to export image.');
+      alert('Failed to export image. Please try again.');
     } finally {
       setIsExporting(false);
     }
   };
 
-  const handleCopyClipboard = () => {
-    const success = copyHtmlTableToClipboard(config.title, entries, config);
+  const handleCopyClipboard = async () => {
+    const success = await copyHtmlTableToClipboard(config.title, entries, config);
     if (success) {
       setCopied(true);
+      logActivity('export_docx', 'Copied Table for Word', 'Word-formatted table placed in clipboard');
       setTimeout(() => setCopied(false), 3000);
     } else {
       alert('Clipboard copy not supported by your browser. Please use Word (.docx) export.');
@@ -232,17 +278,18 @@ export default function App() {
   };
 
   const handlePrint = () => {
+    logActivity('print_draw', 'Print Tournament Draw', `Title: "${config.title || 'Draw'}"`);
     window.print();
   };
 
-  // Export current draw as reusable JSON project file
+  // Export JSON project file
   const handleExportJson = () => {
     const project = {
-      version: '1.0',
       title: config.title,
       rawText,
       config,
       exportedAt: new Date().toISOString(),
+      version: '1.0',
     };
     const jsonStr = JSON.stringify(project, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -287,6 +334,7 @@ export default function App() {
         isExporting={isExporting}
         licenseState={licenseState}
         onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
+        onOpenAdminPortal={() => setIsAdminPortalOpen(true)}
       />
 
       {/* Main Workspace Body */}
@@ -354,6 +402,17 @@ export default function App() {
         onClose={() => setIsLicenseModalOpen(false)}
         licenseState={licenseState}
         onUpdateLicense={setLicenseState}
+        onOpenAdminPortal={() => setIsAdminPortalOpen(true)}
+      />
+
+      {/* Admin Operations & Live Metrics Portal */}
+      <AdminPortal
+        isOpen={isAdminPortalOpen}
+        onClose={() => setIsAdminPortalOpen(false)}
+        licenseState={licenseState}
+        onAuthenticateMaster={handleAuthenticateMaster}
+        onActivateDeveloperPass={handleActivateDeveloperPass}
+        onResetToTrial={handleResetToTrial}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, FileText, Download, Printer, Copy, Sparkles } from 'lucide-react';
+import { Trophy, FileText, Download, Printer, Copy, Sparkles, Shield } from 'lucide-react';
 import { BracketConfig } from '../types';
 import { LicenseBadge } from './LicenseBadge';
 import { LicenseState } from '../utils/license';
@@ -16,6 +16,7 @@ interface HeaderProps {
   isExporting: boolean;
   licenseState: LicenseState;
   onOpenLicenseModal: () => void;
+  onOpenAdminPortal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,15 +29,36 @@ export const Header: React.FC<HeaderProps> = ({
   isExporting,
   licenseState,
   onOpenLicenseModal,
+  onOpenAdminPortal,
 }) => {
+  const [logoClicks, setLogoClicks] = React.useState(0);
+
+  const handleLogoClick = () => {
+    const next = logoClicks + 1;
+    if (next >= 5) {
+      setLogoClicks(0);
+      if (onOpenAdminPortal) onOpenAdminPortal();
+    } else {
+      setLogoClicks(next);
+      setTimeout(() => setLogoClicks(0), 3000);
+    }
+  };
+
+  const isMaster = licenseState.activePass?.isMasterKey === true;
+
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md print:hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
         {/* Logo & Title */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm font-bold">
+          <button
+            type="button"
+            onClick={handleLogoClick}
+            className="w-10 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white shadow-sm font-bold cursor-pointer transition"
+            title="Tournament Draw Generator"
+          >
             <Trophy className="w-5 h-5" />
-          </div>
+          </button>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
               Tournament Draw Generator
@@ -54,6 +76,19 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           {/* License Status Badge */}
           <LicenseBadge licenseState={licenseState} onOpenModal={onOpenLicenseModal} />
+
+          {/* Admin Dashboard Button - ONLY visible to Master Developer / Admin */}
+          {isMaster && onOpenAdminPortal && (
+            <button
+              type="button"
+              onClick={onOpenAdminPortal}
+              className="flex items-center gap-1.5 bg-blue-950/80 hover:bg-blue-900 text-blue-300 hover:text-white text-xs font-semibold px-2.5 py-2 rounded-lg border border-blue-600/40 hover:border-blue-400 transition cursor-pointer shadow-2xs"
+              title="Developer & Owner Admin Dashboard"
+            >
+              <Shield className="w-3.5 h-3.5 text-blue-400" />
+              <span>Admin Portal</span>
+            </button>
+          )}
 
           {/* Preset Selector */}
           <div className="flex items-center gap-1.5 bg-slate-800/80 rounded-lg p-1 border border-slate-700">
@@ -86,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onExportDocx}
               disabled={isExporting}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition shadow-sm disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition shadow-sm disabled:opacity-50 cursor-pointer"
               title="Download editable Microsoft Word (.docx) document"
             >
               <FileText className="w-4 h-4 text-blue-200" />
@@ -96,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onExportPdf}
               disabled={isExporting}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 transition disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 transition disabled:opacity-50 cursor-pointer"
               title="Export as PDF"
             >
               <Download className="w-4 h-4 text-slate-300" />
@@ -106,7 +141,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onExportPng}
               disabled={isExporting}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 transition disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-700 transition disabled:opacity-50 cursor-pointer"
               title="Export high quality image"
             >
               <span className="hidden sm:inline">PNG</span>
@@ -114,7 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={onCopyClipboard}
-              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-2.5 py-2 rounded-lg border border-slate-700 transition"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-2.5 py-2 rounded-lg border border-slate-700 transition cursor-pointer"
               title="Copy editable table for Word Ctrl+V"
             >
               <Copy className="w-3.5 h-3.5 text-slate-300" />
@@ -123,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={onPrint}
-              className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition"
+              className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition cursor-pointer"
               title="Print Draw Sheet"
             >
               <Printer className="w-4 h-4" />
