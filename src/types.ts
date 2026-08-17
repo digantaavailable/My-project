@@ -83,7 +83,16 @@ export interface PaymentLogRecord {
   timestamp: number;
 }
 
+export interface AdminPricingConfig {
+  passPriceInr: number;
+  currency: string;
+  passDurationHours: number;
+  planName: string;
+  updatedAt: number;
+}
+
 export interface AdminDashboardData {
+  pricing?: AdminPricingConfig;
   metrics: {
     totalDrawsCreated: number;
     totalExportsDocx: number;

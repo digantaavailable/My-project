@@ -73,6 +73,14 @@ async function startServer() {
     ],
   ]);
 
+  const pricingConfig = {
+    passPriceInr: 300,
+    currency: 'INR',
+    passDurationHours: 24,
+    planName: '24-Hour Full Access Pass',
+    updatedAt: Date.now(),
+  };
+
   const metricsCounter = {
     totalDrawsCreated: 14,
     totalExportsDocx: 9,
@@ -109,13 +117,15 @@ async function startServer() {
   // --- API 1: Create Razorpay Order ---
   app.post('/api/razorpay/create-order', async (req, res) => {
     try {
-      const { amount = 300, currency = 'INR', email } = req.body;
+      const targetAmount = req.body.amount || pricingConfig.passPriceInr || 300;
+      const currency = req.body.currency || pricingConfig.currency || 'INR';
+      const email = req.body.email;
       const rzpConfig = getRazorpayInstance();
 
       if (!rzpConfig) {
         return res.json({
           id: null,
-          amount: Math.round(amount * 100),
+          amount: Math.round(targetAmount * 100),
           currency,
           keyId: 'rzp_live_TPgpZVAt5gFQkx',
           fallback: true,
@@ -126,12 +136,12 @@ async function startServer() {
 
       try {
         const order = await razorpay.orders.create({
-          amount: Math.round(amount * 100),
+          amount: Math.round(targetAmount * 100),
           currency,
           receipt: `rcpt_${Date.now().toString().slice(-10)}`,
           notes: {
             email: email || '',
-            product: 'Tournament Draw 24H Pass',
+            product: `${pricingConfig.planName || 'Tournament Draw Pass'} (₹${targetAmount})`,
           },
         });
 
@@ -145,7 +155,7 @@ async function startServer() {
         console.warn('Razorpay server order creation returned:', orderErr?.message || orderErr);
         return res.json({
           id: null,
-          amount: Math.round(amount * 100),
+          amount: Math.round(targetAmount * 100),
           currency,
           keyId: keyId,
           fallback: true,
@@ -355,6 +365,7 @@ async function startServer() {
       });
 
       return res.json({
+        pricing: pricingConfig,
         metrics: {
           totalDrawsCreated: metricsCounter.totalDrawsCreated,
           totalExportsDocx: metricsCounter.totalExportsDocx,
@@ -368,6 +379,35 @@ async function startServer() {
         recentPayments: paymentLogs.slice(0, 50),
         recentActivities: activityLogs.slice(0, 100),
       });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- API 6.1: Update Pass Pricing ---
+  app.post('/api/admin/update-pricing', (req, res) => {
+    try {
+      const { passPriceInr, planName, passDurationHours } = req.body;
+      if (typeof passPriceInr === 'number' && passPriceInr > 0) {
+        pricingConfig.passPriceInr = Math.round(passPriceInr);
+      }
+      if (typeof passDurationHours === 'number' && passDurationHours > 0) {
+        pricingConfig.passDurationHours = Math.round(passDurationHours);
+      }
+      if (planName && typeof planName === 'string') {
+        pricingConfig.planName = planName.trim();
+      }
+      pricingConfig.updatedAt = Date.now();
+
+      activityLogs.unshift({
+        id: `act_${Date.now()}`,
+        type: 'admin_action',
+        title: `Pass Price Updated to ₹${pricingConfig.passPriceInr}`,
+        details: `Updated via Admin Dashboard to ₹${pricingConfig.passPriceInr} INR (${pricingConfig.passDurationHours}h)`,
+        timestamp: Date.now(),
+      });
+
+      return res.json({ success: true, pricing: pricingConfig });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }

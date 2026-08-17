@@ -20,6 +20,9 @@ import {
   Zap,
   Lock,
   ArrowRight,
+  DollarSign,
+  Settings,
+  Save,
 } from 'lucide-react';
 import { AdminDashboardData, TrialCodeRecord } from '../types';
 import { formatRemainingTime, LicenseState, isDeveloperMasterKey } from '../utils/license';
@@ -29,6 +32,8 @@ import {
   generateLocalTrialCode,
   revokeLocalTrialCode,
   clearLocalActivities,
+  getPricingConfig,
+  savePricingConfig,
 } from '../utils/adminStore';
 
 interface AdminPortalProps {
@@ -51,12 +56,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [data, setData] = useState<AdminDashboardData>(() => getLocalAdminData());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'codes' | 'activity' | 'payments'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'pricing' | 'codes' | 'activity' | 'payments'>('overview');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   // Authentication gate state
   const [authKeyInput, setAuthKeyInput] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Price configuration editor state
+  const [passPriceInput, setPassPriceInput] = useState<number>(() => getPricingConfig().passPriceInr);
+  const [passDurationInput, setPassDurationInput] = useState<number>(() => getPricingConfig().passDurationHours);
+  const [planNameInput, setPlanNameInput] = useState<string>(() => getPricingConfig().planName);
+  const [pricingSuccessMsg, setPricingSuccessMsg] = useState<string | null>(null);
+  const [isSavingPrice, setIsSavingPrice] = useState<boolean>(false);
 
   const isMaster = licenseState.activePass?.isMasterKey === true;
 
@@ -73,6 +85,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     // 1. Immediately load local store
     const local = getLocalAdminData();
     setData(local);
+    if (local.pricing) {
+      setPassPriceInput(local.pricing.passPriceInr);
+      setPassDurationInput(local.pricing.passDurationHours);
+      setPlanNameInput(local.pricing.planName);
+    }
 
     // 2. Try fetching from server if backend is active
     try {
@@ -82,6 +99,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         if (jsonData && jsonData.metrics) {
           setData(jsonData);
           saveLocalAdminData(jsonData);
+          if (jsonData.pricing) {
+            setPassPriceInput(jsonData.pricing.passPriceInr);
+            setPassDurationInput(jsonData.pricing.passDurationHours);
+            setPlanNameInput(jsonData.pricing.planName);
+          }
         }
       }
     } catch {
@@ -120,6 +142,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       }
     } else {
       setAuthError('Invalid Master Developer Key. Access denied.');
+    }
+  };
+
+  const handleSavePricing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPricingSuccessMsg(null);
+    setIsSavingPrice(true);
+
+    const price = Math.max(1, Number(passPriceInput) || 300);
+    const duration = Math.max(1, Number(passDurationInput) || 24);
+    const name = planNameInput.trim() || '24-Hour Full Access Pass';
+
+    // 1. Save to local admin store
+    const updatedPricing = savePricingConfig({
+      passPriceInr: price,
+      passDurationHours: duration,
+      planName: name,
+    });
+
+    const updatedLocal = getLocalAdminData();
+    setData(updatedLocal);
+    setPricingSuccessMsg(`Price updated successfully to ₹${price} INR for ${duration} Hours!`);
+
+    // 2. Sync to server if backend is active
+    try {
+      await fetch('/api/admin/update-pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          passPriceInr: price,
+          passDurationHours: duration,
+          planName: name,
+        }),
+      });
+    } catch {
+      // Ignored for static hosting
+    } finally {
+      setIsSavingPrice(false);
+      setTimeout(() => setPricingSuccessMsg(null), 4000);
     }
   };
 
@@ -274,10 +335,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         ) : (
           <>
             {/* Navigation Tabs */}
-            <div className="flex border-b border-slate-800 bg-slate-950/60 px-5 pt-2 gap-2">
+            <div className="flex border-b border-slate-800 bg-slate-950/60 px-5 pt-2 gap-2 overflow-x-auto">
               <button
                 onClick={() => setActiveTab('overview')}
-                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap ${
                   activeTab === 'overview'
                     ? 'border-blue-500 text-blue-400'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -287,8 +348,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 Overview & Metrics
               </button>
               <button
+                onClick={() => setActiveTab('pricing')}
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap ${
+                  activeTab === 'pricing'
+                    ? 'border-blue-500 text-blue-400'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <DollarSign className="w-4 h-4" />
+                Pricing & Plans (₹{passPriceInput})
+              </button>
+              <button
                 onClick={() => setActiveTab('codes')}
-                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap ${
                   activeTab === 'codes'
                     ? 'border-blue-500 text-blue-400'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -299,7 +371,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </button>
               <button
                 onClick={() => setActiveTab('activity')}
-                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap ${
                   activeTab === 'activity'
                     ? 'border-blue-500 text-blue-400'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -310,7 +382,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </button>
               <button
                 onClick={() => setActiveTab('payments')}
-                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap ${
                   activeTab === 'payments'
                     ? 'border-blue-500 text-blue-400'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -435,6 +507,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </div>
               </div>
 
+              {/* Quick Pricing Summary Banner with Direct Change Link */}
+              <div className="bg-linear-to-r from-slate-800/90 to-blue-950/40 border border-slate-700 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
+                    ₹
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <span>Pass Price: ₹{passPriceInput} INR ({passDurationInput} Hours)</span>
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-medium">
+                        Active Paywall Price
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Users are charged ₹{passPriceInput} on checkout. You can modify this amount anytime.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setActiveTab('pricing')}
+                  className="bg-slate-800 hover:bg-slate-700 text-blue-400 hover:text-blue-300 text-xs font-bold px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  Change Amount & Plans &rarr;
+                </button>
+              </div>
+
               {/* Recent Activity Snapshot */}
               <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -468,6 +568,163 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* --- TAB: PRICING & PLAN SETTINGS --- */}
+          {activeTab === 'pricing' && (
+            <div className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-emerald-400" />
+                    Access Pass Pricing Configuration
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Change the price and duration for the tournament pass. Updates apply instantly across the user paywall and Razorpay checkout.
+                  </p>
+                </div>
+                <div className="bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-300">
+                  Current Active Price: <span className="font-bold text-emerald-400">₹{passPriceInput} {data?.pricing?.currency || 'INR'}</span>
+                </div>
+              </div>
+
+              {pricingSuccessMsg && (
+                <div className="bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs px-4 py-3 rounded-xl flex items-center gap-2 animate-in fade-in">
+                  <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  <span>{pricingSuccessMsg}</span>
+                </div>
+              )}
+
+              <form
+                onSubmit={handleSavePricing}
+                className="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 space-y-5"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Price in INR */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Pass Price (₹ INR):
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-sm">₹</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100000"
+                        step="1"
+                        value={passPriceInput}
+                        onChange={(e) => setPassPriceInput(Number(e.target.value))}
+                        className="w-full text-sm font-bold bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-white focus:outline-none focus:border-blue-500 font-mono shadow-inner"
+                        required
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-500 block mt-1">
+                      Amount charged to user on Razorpay checkout
+                    </span>
+                  </div>
+
+                  {/* Validity Duration (Hours) */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Validity Period (Hours):
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="1"
+                        max="8760"
+                        value={passDurationInput}
+                        onChange={(e) => setPassDurationInput(Number(e.target.value))}
+                        className="w-full text-sm font-bold bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 font-mono shadow-inner"
+                        required
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-500 block mt-1">
+                      Continuous active access time (Default: 24h)
+                    </span>
+                  </div>
+
+                  {/* Plan Name / Title */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Plan Title:
+                    </label>
+                    <input
+                      type="text"
+                      value={planNameInput}
+                      onChange={(e) => setPlanNameInput(e.target.value)}
+                      placeholder="e.g. 24-Hour Full Access Pass"
+                      className="w-full text-xs font-medium bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 shadow-inner"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-500 block mt-1">
+                      Displayed on paywall modal & receipts
+                    </span>
+                  </div>
+                </div>
+
+                {/* Preset Quick-Picks */}
+                <div className="pt-2 border-t border-slate-700/60">
+                  <div className="text-[11px] font-semibold text-slate-400 mb-2">Quick Price Presets:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[150, 200, 300, 499, 750, 999].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setPassPriceInput(preset)}
+                        className={`text-xs px-3 py-1.5 rounded-lg border transition cursor-pointer font-medium ${
+                          passPriceInput === preset
+                            ? 'bg-blue-600 border-blue-500 text-white font-bold'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        ₹{preset} INR
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Preview Card */}
+                <div className="bg-slate-900/80 border border-slate-700/80 rounded-xl p-4">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                    Paywall Customer Preview
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-800/80 p-3 rounded-lg border border-slate-700">
+                    <div>
+                      <div className="font-bold text-xs text-white">{planNameInput || 'Full Access Pass'}</div>
+                      <div className="text-[11px] text-slate-400">Valid for {passDurationInput || 24} hours from purchase</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-base font-extrabold text-emerald-400">₹{passPriceInput || 300}</div>
+                      <div className="text-[10px] text-slate-400">INR / {passDurationInput || 24} Hours</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPassPriceInput(300);
+                      setPassDurationInput(24);
+                      setPlanNameInput('24-Hour Full Access Pass');
+                    }}
+                    className="px-4 py-2.5 text-xs text-slate-400 hover:text-slate-200 transition font-medium cursor-pointer"
+                  >
+                    Reset to Default (₹300)
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingPrice}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    {isSavingPrice ? 'Saving Price...' : 'Save & Publish Price'}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 
@@ -710,7 +967,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
                     <div className="text-[11px] text-slate-400">Product Price</div>
-                    <div className="text-xs font-bold text-emerald-400 mt-0.5">₹300 / 24 Hours</div>
+                    <div className="text-xs font-bold text-emerald-400 mt-0.5">
+                      ₹{passPriceInput} / {passDurationInput} Hours
+                    </div>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
                     <div className="text-[11px] text-slate-400">Webhook / Verification</div>

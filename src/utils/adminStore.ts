@@ -1,6 +1,61 @@
-import { AdminDashboardData, ActivityEvent, TrialCodeRecord, PaymentLogRecord } from '../types';
+import { AdminDashboardData, ActivityEvent, TrialCodeRecord, PaymentLogRecord, AdminPricingConfig } from '../types';
 
 const ADMIN_STORAGE_KEY = 'tournament_draw_admin_data_v2';
+const PRICING_STORAGE_KEY = 'tournament_draw_pricing_config_v1';
+
+export const DEFAULT_PRICING: AdminPricingConfig = {
+  passPriceInr: 300,
+  currency: 'INR',
+  passDurationHours: 24,
+  planName: '24-Hour Full Access Pass',
+  updatedAt: Date.now(),
+};
+
+export function getPricingConfig(): AdminPricingConfig {
+  try {
+    const raw = localStorage.getItem(PRICING_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.passPriceInr === 'number' && parsed.passPriceInr > 0) {
+        return {
+          passPriceInr: parsed.passPriceInr,
+          currency: parsed.currency || 'INR',
+          passDurationHours: parsed.passDurationHours || 24,
+          planName: parsed.planName || '24-Hour Full Access Pass',
+          updatedAt: parsed.updatedAt || Date.now(),
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to read pricing config from localStorage', e);
+  }
+  return DEFAULT_PRICING;
+}
+
+export function savePricingConfig(newPricing: Partial<AdminPricingConfig>): AdminPricingConfig {
+  const current = getPricingConfig();
+  const updated: AdminPricingConfig = {
+    ...current,
+    ...newPricing,
+    passPriceInr: Math.max(1, Number(newPricing.passPriceInr ?? current.passPriceInr)),
+    updatedAt: Date.now(),
+  };
+
+  try {
+    localStorage.setItem(PRICING_STORAGE_KEY, JSON.stringify(updated));
+  } catch (e) {
+    console.warn('Failed to save pricing config', e);
+  }
+
+  // Also log activity
+  recordLocalActivity(
+    'admin_action',
+    `Pass Pricing Updated: ₹${updated.passPriceInr}`,
+    `Pass cost adjusted to ₹${updated.passPriceInr} INR (${updated.passDurationHours}h duration)`
+  );
+
+  return updated;
+}
 
 const DEFAULT_TRIAL_CODES: TrialCodeRecord[] = [
   {
@@ -54,6 +109,7 @@ export function getLocalAdminData(): AdminDashboardData {
         });
 
         return {
+          pricing: getPricingConfig(),
           metrics: {
             totalDrawsCreated: parsed.metrics.totalDrawsCreated ?? 14,
             totalExportsDocx: parsed.metrics.totalExportsDocx ?? 9,
@@ -74,6 +130,7 @@ export function getLocalAdminData(): AdminDashboardData {
   }
 
   return {
+    pricing: getPricingConfig(),
     metrics: {
       totalDrawsCreated: 14,
       totalExportsDocx: 9,

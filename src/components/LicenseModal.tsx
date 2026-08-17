@@ -22,6 +22,7 @@ import {
   formatRemainingTime,
   isDeveloperMasterKey,
 } from '../utils/license';
+import { getPricingConfig } from '../utils/adminStore';
 
 declare global {
   interface Window {
@@ -44,6 +45,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   onUpdateLicense,
   onOpenAdminPortal,
 }) => {
+  const [pricing, setPricing] = useState(() => getPricingConfig());
   const [activeTab, setActiveTab] = useState<'buy' | 'key'>('buy');
   const [licenseKeyInput, setLicenseKeyInput] = useState<string>('');
   const [customerEmail, setCustomerEmail] = useState<string>('');
@@ -52,6 +54,24 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
   const [isActivatingKey, setIsActivatingKey] = useState<boolean>(false);
   const [razorpayLoaded, setRazorpayLoaded] = useState<boolean>(false);
+
+  // Sync latest pricing whenever modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setPricing(getPricingConfig());
+      // Also try fetching from server if backend is active
+      fetch('/api/admin/data')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.pricing) {
+            setPricing(data.pricing);
+          }
+        })
+        .catch(() => {
+          // Static deployment fallback
+        });
+    }
+  }, [isOpen]);
 
   // Remaining time on pass
   const [remainingTimeStr, setRemainingTimeStr] = useState<string>('');
@@ -138,12 +158,16 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
     }
   };
 
-  // Handle Razorpay Payment for 24-Hour Pass (₹300)
+  // Handle Razorpay Payment for Pass (configured amount e.g. ₹300)
   const handleRazorpayPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
     setIsProcessingPayment(true);
+
+    const price = pricing?.passPriceInr || 300;
+    const currency = pricing?.currency || 'INR';
+    const planName = pricing?.planName || '24-Hour Full Access Pass';
 
     try {
       // 1. Create order on server
@@ -151,8 +175,8 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount: 300,
-          currency: 'INR',
+          amount: price,
+          currency: currency,
           email: customerEmail || 'user@tournamentdraw.com',
         }),
       });
@@ -166,7 +190,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
         const updated = activate24HourPass(generatedKey, false);
         onUpdateLicense(updated);
         setSuccessMessage(
-          `24-Hour Pass Activated Successfully! Your Pass Code: ${generatedKey}`
+          `Pass Activated Successfully! Your Pass Code: ${generatedKey}`
         );
         setIsProcessingPayment(false);
         return;
@@ -174,10 +198,10 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
 
       const options = {
         key: keyId,
-        amount: orderData.amount || 30000,
-        currency: orderData.currency || 'INR',
+        amount: orderData.amount || price * 100,
+        currency: orderData.currency || currency,
         name: 'Tournament Draw Pro',
-        description: '24-Hour Full Access Pass (Unlimited Draws & Exports)',
+        description: `${planName} (Unlimited Draws & Exports)`,
         order_id: orderData.id || undefined,
         prefill: {
           email: customerEmail || '',
@@ -205,14 +229,14 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             const updated = activate24HourPass(generatedKey, false);
             onUpdateLicense(updated);
             setSuccessMessage(
-              `Payment Successful! 24-Hour Pass activated. (Pass Code: ${generatedKey})`
+              `Payment Successful! Pass activated. (Pass Code: ${generatedKey})`
             );
           } catch (err: any) {
             console.error('Payment processing error', err);
             const generatedKey = generateRandom24HourKey();
             const updated = activate24HourPass(generatedKey, false);
             onUpdateLicense(updated);
-            setSuccessMessage('Payment Received! 24-Hour Pass activated.');
+            setSuccessMessage('Payment Received! Pass activated.');
           } finally {
             setIsProcessingPayment(false);
           }
@@ -335,7 +359,7 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
             }`}
           >
             <CreditCard className="w-4 h-4" />
-            Buy 24-Hour Pass (₹300)
+            Buy {pricing?.passDurationHours || 24}-Hour Pass (₹{pricing?.passPriceInr || 300})
           </button>
           <button
             onClick={() => {
@@ -377,15 +401,15 @@ export const LicenseModal: React.FC<LicenseModalProps> = ({
                 <div className="flex justify-between items-start mb-2">
                   <div>
                     <h3 className="text-sm font-bold text-slate-900">
-                      24-Hour Full Access Pass
+                      {pricing?.planName || '24-Hour Full Access Pass'}
                     </h3>
                     <p className="text-xs text-slate-600">
-                      Valid for 24 continuous hours from activation
+                      Valid for {pricing?.passDurationHours || 24} continuous hours from activation
                     </p>
                   </div>
                   <div className="text-right">
-                    <span className="text-xl font-extrabold text-blue-600">₹300</span>
-                    <span className="text-[10px] text-slate-500 block">INR / 24 Hours</span>
+                    <span className="text-xl font-extrabold text-blue-600">₹{pricing?.passPriceInr || 300}</span>
+                    <span className="text-[10px] text-slate-500 block">{pricing?.currency || 'INR'} / {pricing?.passDurationHours || 24} Hours</span>
                   </div>
                 </div>
 
